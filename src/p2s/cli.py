@@ -6,7 +6,7 @@
     p2s host     --report out/                        # 主机侧检测
     p2s ioc      --scan-file sample.txt               # IOC 匹配
     p2s rules    --format sigma                       # 导出规则
-    p2s serve    --port 8080                          # 启动 Web 控制台
+    p2s serve    --port 18080                          # 启动 Web 控制台
 """
 from __future__ import annotations
 
@@ -171,6 +171,20 @@ def cmd_rules(args: argparse.Namespace) -> int:
     return 0
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    """检测端口是否已被占用（纯本地 socket 绑定测试，不发任何流量）。"""
+    import socket
+
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError:
+            return True
+    return False
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     try:
         import uvicorn
@@ -179,7 +193,23 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except ImportError as exc:
         print(f"缺少 Web 控制台依赖，请先安装: pip install -e \".[console]\"  ({exc})", file=sys.stderr)
         return 2
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    port = args.port
+    if _port_in_use(args.host, port):
+        if args.no_fallback:
+            print(f"端口 {port} 已被占用，请用 --port 指定其它端口", file=sys.stderr)
+            return 3
+        for candidate in range(port + 1, port + 50):
+            if not _port_in_use(args.host, candidate):
+                print(f"端口 {port} 已被占用，自动改用 {candidate}", file=sys.stderr)
+                port = candidate
+                break
+        else:
+            print(f"端口 {port}~{port + 49} 均被占用，请用 --port 指定", file=sys.stderr)
+            return 3
+
+    print(f"p2s 控制台已启动: http://{args.host}:{port}", file=sys.stderr)
+    print("按 Ctrl+C 退出", file=sys.stderr)
+    uvicorn.run(app, host=args.host, port=port, log_level="info")
     return 0
 
 
@@ -232,7 +262,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("serve", help="启动 Web 控制台")
     sp.add_argument("--host", default="127.0.0.1")
-    sp.add_argument("--port", type=int, default=8080)
+    sp.add_argument("--port", type=int, default=118080, help="默认 118080；被占用时自动顺延")
+    sp.add_argument("--no-fallback", action="store_true", help="端口被占用时直接报错，不自动顺延")
     sp.set_defaults(func=cmd_serve)
     return p
 

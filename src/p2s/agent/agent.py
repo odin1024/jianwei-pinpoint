@@ -6,7 +6,7 @@
 
 部署（客户主机）：
     pip install p2s            # 或从源码安装
-    p2s-agent --console http://console.internal:8080 --interval 3600
+    p2s-agent --console http://console.internal:18080 --interval 3600
 
     Windows 计划任务 / Linux systemd timer 均可调度。
 """
@@ -40,7 +40,7 @@ def post_console(console: str, payload: dict, timeout: float = 30.0) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="p2s-agent", description="p2s 主机侧检测 Agent")
-    p.add_argument("--console", help="控制台地址，例如 http://127.0.0.1:8080")
+    p.add_argument("--console", help="控制台地址，例如 http://127.0.0.1:18080")
     p.add_argument("--interval", type=int, default=0, help="循环上报间隔（秒），0 表示只跑一次")
     p.add_argument("--out", help="把本地报告同时写入该目录")
     p.add_argument("--timeout", type=float, default=30.0)

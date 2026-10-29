@@ -6,7 +6,7 @@
   - 报告中心：一键生成 JSON / Markdown / HTML 报告，可直接发给客户
   - 规则与 IOC：内置规则库与 IOC 库，支持导出
 
-开发期： p2s serve --port 8080
+开发期： p2s serve --port 18080
 """
 from __future__ import annotations
 

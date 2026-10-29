@@ -11,7 +11,7 @@
 ```bash
 git clone <repo> && cd p2s
 docker compose up -d
-# 浏览器打开 http://<服务器>:8080
+# 浏览器打开 http://<服务器>:18080
 ```
 
 只暴露一个 HTTP 端口。数据落在 `p2s_data` 卷里。
@@ -33,7 +33,7 @@ docker compose up -d
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[console]"
-p2s serve --host 0.0.0.0 --port 8080
+p2s serve --host 0.0.0.0 --port 18080
 ```
 
 Windows：
@@ -42,7 +42,7 @@ Windows：
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[console]"
-p2s serve --port 8080
+p2s serve --port 18080
 ```
 
 **要求**：Python 3.9+。
@@ -80,7 +80,7 @@ L3（生效配置、落地文件、进程、连接）必须在目标主机本地
 pip install p2s            # 或从源码安装
 cat >/etc/systemd/system/p2s-agent.service <<'EOF'
 [Service]
-ExecStart=/usr/local/bin/p2s-agent --console http://console.internal:8080
+ExecStart=/usr/local/bin/p2s-agent --console http://console.internal:18080
 User=root
 EOF
 
@@ -99,7 +99,7 @@ systemctl enable --now p2s-agent.timer
 ### Windows（计划任务）
 
 ```powershell
-p2s-agent.exe --console http://console.internal:8080 --interval 3600
+p2s-agent.exe --console http://console.internal:18080 --interval 3600
 # 注册为计划任务：程序 p2s-agent.exe，参数如上，触发器为系统启动时 + 每 1 小时重复
 ```
 

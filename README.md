@@ -76,9 +76,19 @@ python -m p2s.cli logs --file examples\access.log.sample --report reports\
 python -m p2s.cli host --report reports\
 
 # Web 控制台
-python -m p2s.cli serve --port 8080
-# 浏览器打开 http://127.0.0.1:8080
+python -m p2s.cli serve --port 18080
+# 浏览器打开 http://127.0.0.1:18080
 ```
+
+**后台常驻启动（Windows）**
+
+```powershell
+.\scripts\start-console.ps1                 # 默认 18080，自动检测端口占用
+.\scripts\start-console.ps1 -Port 19000     # 指定端口
+.\scripts\stop-console.ps1                  # 停止
+```
+
+> `serve` 命令在端口被占用时会**自动顺延**到下一个可用端口；`--no-fallback` 可关闭该行为。
 
 ---
 
@@ -159,7 +169,7 @@ p2s logs   --file access.log  --report reports/  # 被动日志检测（L1）
 p2s host   --report reports/                     # 主机侧检测（L3）
 p2s ioc    --scan-file sample.txt                # IOC 匹配
 p2s rules  --format json                         # 导出规则库
-p2s serve  --port 8080                           # 启动 Web 控制台
+p2s serve  --port 18080                           # 启动 Web 控制台
 ```
 
 ---

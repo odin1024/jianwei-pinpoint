@@ -16,3 +16,5 @@ p2s-data/
 *.log
 data/
 !data/.gitkeep
+.run/
+.p2s-port
