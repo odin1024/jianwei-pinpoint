@@ -1,0 +1,262 @@
+"""p2s 命令行入口。
+
+    p2s assets   --file hosts.txt --report out/       # 资产测绘 + 版本判定
+    p2s probe    --file hosts.txt --report out/       # 资产测绘 + 主动探测
+    p2s logs     --file access.log --report out/      # 被动日志检测
+    p2s host     --report out/                        # 主机侧检测
+    p2s ioc      --scan-file sample.txt               # IOC 匹配
+    p2s rules    --format sigma                       # 导出规则
+    p2s serve    --port 8080                          # 启动 Web 控制台
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from .core import hostcheck, logscan
+from .core import ioc as ioc_mod
+from .core import probe as probe_mod
+from .core import report as report_mod
+from .core.rules import RULES
+from .core.versions import classify
+
+
+def _now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _read_hosts(path: str | None, inline: list[str] | None) -> list[str]:
+    hosts: list[str] = []
+    if path:
+        for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                hosts.append(line)
+    if inline:
+        hosts.extend(h.strip() for h in inline if h.strip())
+    seen, out = set(), []
+    for h in hosts:
+        if h not in seen:
+            seen.add(h)
+            out.append(h)
+    return out
+
+
+def _emit(result: report_mod.ScanResult, outdir: str | None, quiet: bool) -> None:
+    result.finished_at = _now()
+    if not quiet:
+        counts = result.severity_counts
+        print(f"\n扫描完成 [{result.scan_id}]  风险={result.risk.upper()}  目标={result.target_count}")
+        if counts:
+            print("  命中分布: " + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+        for a in result.assets:
+            v = a.get("version_verdict", {})
+            fp = a.get("fingerprint", {})
+            print(f"  [{a.get('risk','-'):8}] {a.get('url')}  PHP={v.get('version','?')} "
+                  f"SAPI={fp.get('sapi_label','?')}  版本={v.get('status','?')} 探测={a.get('probe_verdict','?')}")
+        for f in result.findings[:20]:
+            print(f"  ! [{f.get('severity')}] {f.get('rule_id')} {f.get('rule_name')} :: {str(f.get('evidence'))[:110]}")
+        if len(result.findings) > 20:
+            print(f"  ... 另有 {len(result.findings)-20} 条命中")
+    if outdir:
+        d = Path(outdir)
+        d.mkdir(parents=True, exist_ok=True)
+        base = d / result.scan_id
+        report_mod.to_json(result, base.with_suffix(".json"))
+        report_mod.to_markdown(result, base.with_suffix(".md"))
+        report_mod.to_html(result, base.with_suffix(".html"))
+        if not quiet:
+            print(f"\n报告已生成:\n  {base}.json\n  {base}.md\n  {base}.html")
+
+
+# --------------------------------------------------------------------------
+def cmd_assets(args: argparse.Namespace) -> int:
+    hosts = _read_hosts(args.file, args.url)
+    res = report_mod.ScanResult(scan_id=f"assets-{uuid.uuid4().hex[:10]}", kind="assets", started_at=_now())
+    res.target_count = len(hosts)
+    for h in hosts:
+        url = h if h.startswith("http") else f"http://{h}"
+        fp = probe_mod.fingerprint(url, timeout=args.timeout)
+        vv = classify(fp.php_version)
+        asm = probe_mod.Assessment(url=url, fingerprint=fp, version_verdict=vv)
+        asm.probe_verdict = "skipped"
+        asm.confidence = 0.9 if fp.php_version else 0.3
+        asm.remediation = probe_mod._remediation(vv)
+        res.assets.append(asm.to_dict())
+    _emit(res, args.report, args.quiet)
+    return 0
+
+
+def cmd_probe(args: argparse.Namespace) -> int:
+    hosts = _read_hosts(args.file, args.url)
+    res = report_mod.ScanResult(scan_id=f"probe-{uuid.uuid4().hex[:10]}", kind="probe", started_at=_now())
+    res.target_count = len(hosts)
+    for h in hosts:
+        url = h if h.startswith("http") else f"http://{h}"
+        asm = probe_mod.assess(url, timeout=args.timeout, do_probe=not args.no_probe)
+        res.assets.append(asm.to_dict())
+    _emit(res, args.report, args.quiet)
+    return 0
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+    res = report_mod.ScanResult(scan_id=f"logs-{uuid.uuid4().hex[:10]}", kind="logs", started_at=_now())
+    lines = Path(args.file).read_text(encoding="utf-8", errors="replace").splitlines()
+    records = list(logscan.iter_records(lines))
+    res.target_count = len(records)
+    fields: set[str] = set()
+    for r in records:
+        fields |= r.fields()
+    from .core.rules import coverage_report
+    res.coverage = coverage_report(fields)
+    findings = logscan.scan_records(records)
+    res.findings = [f.to_dict() for f in findings]
+    res.coverage["parsed_records"] = len(records)
+    res.coverage["total_lines"] = len(lines)
+    _emit(res, args.report, args.quiet)
+    return 0
+
+
+def cmd_host(args: argparse.Namespace) -> int:
+    res = report_mod.ScanResult(scan_id=f"host-{uuid.uuid4().hex[:10]}", kind="host", started_at=_now())
+    rep = hostcheck.run_host_check(deep=not args.shallow)
+    res.target_count = 1
+    res.host_reports = [rep.to_dict()]
+    # 把主机侧的可疑痕迹也映射成 findings
+    for a in rep.artifacts:
+        res.findings.append({
+            "rule_id": "P2S-HOST-001",
+            "rule_name": f"主机侧痕迹: {a.kind}",
+            "severity": a.severity,
+            "dimension": "host",
+            "cves": ["CVE-2026-109618", "CVE-2026-109619"],
+            "ts": rep.checked_at,
+            "ip": rep.hostname,
+            "uri": a.path,
+            "evidence": a.detail,
+        })
+    _emit(res, args.report, args.quiet)
+    return 0
+
+
+def cmd_ioc(args: argparse.Namespace) -> int:
+    lib = ioc_mod.IocLibrary()
+    hits: list[dict] = []
+    if args.scan_file:
+        text = Path(args.scan_file).read_text(encoding="utf-8", errors="replace")
+        for m in lib.match_text(text, context=args.scan_file):
+            hits.append(m.to_dict())
+    if args.hash:
+        m = lib.match_hash(args.hash)
+        if m:
+            hits.append(m.to_dict())
+    if args.summary or not (args.scan_file or args.hash):
+        print(json.dumps(lib.summary(), ensure_ascii=False, indent=2))
+    for h in hits:
+        print(json.dumps(h, ensure_ascii=False))
+    return 1 if hits else 0
+
+
+def cmd_rules(args: argparse.Namespace) -> int:
+    if args.format == "json":
+        print(json.dumps([r.to_dict() for r in RULES], ensure_ascii=False, indent=2))
+    else:
+        print(f"{'ID':<14}{'等级':<10}{'维度':<10}{'需要字段':<14}名称")
+        for r in RULES:
+            print(f"{r.id:<14}{r.severity:<10}{r.dimension:<10}{r.requires:<14}{r.name}")
+    return 0
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    try:
+        import uvicorn
+
+        from .console.app import app
+    except ImportError as exc:
+        print(f"缺少 Web 控制台依赖，请先安装: pip install -e \".[console]\"  ({exc})", file=sys.stderr)
+        return 2
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    return 0
+
+
+# --------------------------------------------------------------------------
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="p2s",
+        description="php2shell (CVE-2026-109618 / CVE-2026-109619) 检测与暴露面评估工具",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def add_report(sp):
+        sp.add_argument("--report", help="报告输出目录（会生成 json/md/html 三份）")
+        sp.add_argument("--quiet", action="store_true", help="只输出报告路径")
+
+    sp = sub.add_parser("assets", help="资产测绘：版本识别 + 修复状态判定")
+    sp.add_argument("--file", help="主机/URL 列表文件")
+    sp.add_argument("--url", action="append", help="单个 URL（可重复）")
+    sp.add_argument("--timeout", type=float, default=10.0)
+    add_report(sp)
+    sp.set_defaults(func=cmd_assets)
+
+    sp = sub.add_parser("probe", help="资产测绘 + 主动安全探测（无害）")
+    sp.add_argument("--file", help="主机/URL 列表文件")
+    sp.add_argument("--url", action="append", help="单个 URL（可重复）")
+    sp.add_argument("--timeout", type=float, default=15.0)
+    sp.add_argument("--no-probe", action="store_true", help="只做版本判定，不发探针")
+    add_report(sp)
+    sp.set_defaults(func=cmd_probe)
+
+    sp = sub.add_parser("logs", help="被动日志检测（L1，零风险）")
+    sp.add_argument("--file", required=True, help="日志文件路径")
+    add_report(sp)
+    sp.set_defaults(func=cmd_logs)
+
+    sp = sub.add_parser("host", help="主机侧检测（L3）")
+    sp.add_argument("--shallow", action="store_true", help="跳过文件内容与哈希检查")
+    add_report(sp)
+    sp.set_defaults(func=cmd_host)
+
+    sp = sub.add_parser("ioc", help="IOC 库查询与匹配")
+    sp.add_argument("--scan-file", help="要扫描 IOC 的文件")
+    sp.add_argument("--hash", help="要匹配的 SHA-256")
+    sp.add_argument("--summary", action="store_true", help="打印 IOC 库摘要")
+    sp.set_defaults(func=cmd_ioc)
+
+    sp = sub.add_parser("rules", help="查看/导出规则库")
+    sp.add_argument("--format", choices=["table", "json"], default="table")
+    sp.set_defaults(func=cmd_rules)
+
+    sp = sub.add_parser("serve", help="启动 Web 控制台")
+    sp.add_argument("--host", default="127.0.0.1")
+    sp.add_argument("--port", type=int, default=8080)
+    sp.set_defaults(func=cmd_serve)
+    return p
+
+
+def _ensure_utf8_console() -> None:
+    """Windows 控制台默认 GBK，中文输出会乱码；这里强制切到 UTF-8。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    _ensure_utf8_console()
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return int(args.func(args) or 0)
+    except KeyboardInterrupt:
+        print("\n已中断", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

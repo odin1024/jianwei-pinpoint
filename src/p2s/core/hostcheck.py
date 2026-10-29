@@ -1,0 +1,512 @@
+"""主机侧检测（L3）——跨平台。
+
+覆盖 Windows / Linux / macOS 的统一抽象：
+  - PHP 安装点清点（PATH、注册表、常见目录、包管理器）
+  - 生效配置核查（多来源合并求实际生效值）
+  - 入侵痕迹（可疑文件、webshell、已知样本哈希、伪装进程、出站连接）
+
+所有操作均为只读。
+"""
+from __future__ import annotations
+
+import hashlib
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+from .ioc import IocLibrary, scan_webshell
+from .versions import classify
+
+IS_WINDOWS = os.name == "nt"
+IS_LINUX = sys.platform.startswith("linux")
+IS_MAC = sys.platform == "darwin"
+
+#: 关键配置项的期望值与说明
+KEY_SETTINGS: tuple[tuple[str, str, str], ...] = (
+    ("session.upload_progress.enabled", "0",
+     "上传进度功能：php2shell 主攻击链的生产者，必须关闭"),
+    ("fatal_error_backtraces", "0",
+     "PHP 8.5 致命错误回溯：已确认 RCE 链路的生产者，应关闭"),
+    ("memory_limit", "-1",
+     "OOM 攻击面：建议 -1（由 php_admin_value 保证不可被应用覆盖）"),
+    ("post_max_size", "8M",
+     "建议收紧：无需上传 8M，需要上传 32M"),
+)
+
+#: 值得留意的配置文件来源（实际生效值 = 这些文件里最"靠后"的决定者）
+CONFIG_SOURCES = {
+    "linux": (
+        "/etc/php/{ver}/fpm/php.ini",
+        "/etc/php/{ver}/fpm/pool.d/*.conf",
+        "/etc/php/{ver}/cli/php.ini",
+        "/etc/php.ini",
+        "/usr/local/etc/php/php.ini",
+    ),
+    "windows": (
+        "C:\\php\\php.ini",
+        "C:\\xampp\\php\\php.ini",
+        "C:\\php{ver}\\php.ini",
+        "C:\\Program Files\\PHP\\php.ini",
+    ),
+    "macos": (
+        "/opt/homebrew/etc/php/php.ini",
+        "/usr/local/etc/php/php.ini",
+        "/opt/local/etc/php/php.ini",
+    ),
+}
+
+
+@dataclass
+class PhpInstall:
+    """一个 PHP 安装点。"""
+
+    path: str
+    version: Optional[str] = None
+    sapi: Optional[str] = None
+    configured_path: Optional[str] = None
+    is_default: bool = False
+    verdict_status: Optional[str] = None
+    needs_action: bool = False
+    reason: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class SettingCheck:
+    """一个配置项的核查结果。"""
+
+    name: str
+    actual: Optional[str]
+    expected: str
+    ok: bool
+    note: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class SuspiciousArtifact:
+    """一个可疑痕迹。"""
+
+    kind: str
+    path: str
+    detail: str
+    severity: str
+    sha256: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class HostReport:
+    """主机检测报告。"""
+
+    hostname: str
+    platform: str
+    platform_release: str
+    checked_at: str
+    installs: list[PhpInstall] = field(default_factory=list)
+    settings: list[SettingCheck] = field(default_factory=list)
+    artifacts: list[SuspiciousArtifact] = field(default_factory=list)
+    processes: list[str] = field(default_factory=list)
+    connections: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def risk(self) -> str:
+        if any(a.severity == "critical" for a in self.artifacts):
+            return "critical"
+        if any(i.needs_action for i in self.installs):
+            return "high"
+        if self.artifacts:
+            return "medium"
+        return "low"
+
+    def to_dict(self) -> dict:
+        return {
+            "hostname": self.hostname,
+            "platform": self.platform,
+            "platform_release": self.platform_release,
+            "checked_at": self.checked_at,
+            "risk": self.risk,
+            "installs": [i.to_dict() for i in self.installs],
+            "settings": [s.to_dict() for s in self.settings],
+            "artifacts": [a.to_dict() for a in self.artifacts],
+            "processes": self.processes,
+            "connections": self.connections,
+            "errors": self.errors,
+        }
+
+
+# --------------------------------------------------------------------------
+# PHP 安装点清点
+# --------------------------------------------------------------------------
+
+def _run(cmd: list[str], timeout: float = 12.0) -> tuple[int, str]:
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                              errors="replace")
+        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+    except Exception as exc:  # noqa: BLE001
+        return -1, f"{type(exc).__name__}: {exc}"
+
+
+def _php_version(exe: str) -> Optional[str]:
+    rc, out = _run([exe, "-r", "echo PHP_VERSION;"])
+    if rc == 0:
+        v = out.strip().splitlines()
+        if v:
+            return v[0].strip()
+    rc, out = _run([exe, "-v"])
+    m = re.search(r"PHP (\d+\.\d+\.\d+)", out)
+    return m.group(1) if m else None
+
+
+def _php_sapi(exe: str) -> Optional[str]:
+    rc, out = _run([exe, "-r", "echo PHP_SAPI;"])
+    return out.strip() if rc == 0 and out.strip() else None
+
+
+def _php_ini(exe: str) -> Optional[str]:
+    rc, out = _run([exe, "-i"])
+    m = re.search(r"Loaded Configuration File => (.+)", out)
+    return m.group(1).strip() if m and m.group(1).strip() else None
+
+
+def _candidate_php_paths() -> list[str]:
+    """按平台枚举可能的 PHP 可执行文件位置。"""
+    cands: list[str] = []
+
+    # 1) PATH
+    found = shutil.which("php")
+    if found:
+        cands.append(found)
+
+    # 2) 平台常见目录
+    if IS_WINDOWS:
+        roots = [
+            r"C:\php", r"C:\xampp\php", r"C:\laragon\bin\php", r"C:\wamp64\bin\php",
+            r"C:\Program Files\PHP", r"C:\tools\php", r"C:\php8", r"C:\php7",
+        ]
+        for root in roots:
+            p = Path(root)
+            if p.is_dir():
+                for exe in p.glob("php.exe"):
+                    cands.append(str(exe))
+        # 注册表
+        for hive, key in (
+            ("HKLM", r"SOFTWARE\PHP\PHP"),
+            ("HKCU", r"SOFTWARE\PHP\PHP"),
+        ):
+            try:
+                import winreg
+
+                root = winreg.HKEY_LOCAL_MACHINE if hive == "HKLM" else winreg.HKEY_CURRENT_USER
+                with winreg.OpenKey(root, key) as k:
+                    i = 0
+                    while True:
+                        try:
+                            sub = winreg.EnumKey(k, i)
+                        except OSError:
+                            break
+                        try:
+                            with winreg.OpenKey(k, sub) as sk:
+                                val, _ = winreg.QueryValueEx(sk, "InstallPath")
+                                if val:
+                                    cands.append(str(Path(val) / "php.exe"))
+                        except OSError:
+                            pass
+                        i += 1
+            except Exception:  # noqa: BLE001
+                pass
+    else:
+        for root in ("/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin",
+                     "/usr/sbin", "/opt/php/bin"):
+            p = Path(root)
+            if p.is_dir():
+                for exe in p.glob("php*"):
+                    if exe.is_file() and exe.name in {"php", "php-cli", "php8", "php8.2", "php8.3",
+                                                      "php8.4", "php8.5", "php7"}:
+                        cands.append(str(exe))
+        # Debian/Ubuntu alternatives
+        for alt in ("/etc/alternatives/php",):
+            if Path(alt).exists():
+                cands.append(alt)
+
+    # 去重保序
+    seen: set[str] = set()
+    out = []
+    for c in cands:
+        key = c.lower() if IS_WINDOWS else c
+        if key not in seen:
+            seen.add(key)
+            out.append(c)
+    return out
+
+
+def enumerate_php_installs() -> tuple[list[PhpInstall], list[str]]:
+    """清点主机上的 PHP 安装点。"""
+    installs: list[PhpInstall] = []
+    errors: list[str] = []
+    default = shutil.which("php")
+
+    for path in _candidate_php_paths():
+        ver = _php_version(path)
+        if not ver:
+            continue
+        sapi = _php_sapi(path)
+        v = classify(ver)
+        installs.append(
+            PhpInstall(
+                path=path,
+                version=ver,
+                sapi=sapi,
+                configured_path=_php_ini(path),
+                is_default=(default is not None and os.path.normcase(path) == os.path.normcase(default)),
+                verdict_status=v.status,
+                needs_action=v.needs_action,
+                reason=v.reason,
+            )
+        )
+    if not installs:
+        errors.append("未在本机发现可用的 PHP 安装")
+    return installs, errors
+
+
+# --------------------------------------------------------------------------
+# 配置核查
+# --------------------------------------------------------------------------
+
+def _ini_value(exe: str, key: str) -> Optional[str]:
+    rc, out = _run([exe, "-r", f"echo ini_get('{key}');"])
+    if rc == 0:
+        return out.strip()
+    return None
+
+
+def check_settings(exe: str) -> list[SettingCheck]:
+    """核查关键配置项的实际生效值。"""
+    out: list[SettingCheck] = []
+    for name, expected, note in KEY_SETTINGS:
+        actual = _ini_value(exe, name)
+        if actual is None:
+            out.append(SettingCheck(name, None, expected, False, f"{note}（无法读取生效值）"))
+            continue
+        ok = actual.strip().lower() == expected.lower()
+        if name == "post_max_size":
+            # 允许 8M 或 32M
+            ok = actual.strip().upper() in {"8M", "32M"}
+        out.append(SettingCheck(name, actual, expected, ok, note))
+    return out
+
+
+# --------------------------------------------------------------------------
+# 入侵痕迹
+# --------------------------------------------------------------------------
+
+#: 值得扫描的目录（可能包含攻击者落地文件）
+def _scan_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    tmp = [os.environ.get("TMPDIR"), os.environ.get("TMP"), os.environ.get("TEMP"), "/tmp", "/var/tmp"]
+    for t in tmp:
+        if t and Path(t).is_dir():
+            dirs.append(Path(t))
+    if IS_LINUX:
+        for d in ("/var/lib/php/sessions", "/var/lib/php/session", "/tmp", "/var/tmp",
+                  "/var/www", "/srv/http", "/opt", "/var/lib/php"):
+            if Path(d).is_dir():
+                dirs.append(Path(d))
+    elif IS_WINDOWS:
+        for d in (r"C:\Windows\Temp", r"C:\inetpub\wwwroot", r"C:\xampp\htdocs", r"C:\php"):
+            if Path(d).is_dir():
+                dirs.append(Path(d))
+    elif IS_MAC:
+        for d in ("/private/tmp", "/private/var/tmp", "/usr/local/var/www"):
+            if Path(d).is_dir():
+                dirs.append(Path(d))
+    # 去重
+    out, seen = [], set()
+    for d in dirs:
+        k = str(d)
+        if k not in seen:
+            seen.add(k)
+            out.append(d)
+    return out
+
+
+def _iter_recent_files(dirs: Iterable[Path], since: datetime, max_files: int = 4000):
+    for d in dirs:
+        try:
+            for root, _dirs, files in os.walk(d):
+                for fn in files:
+                    p = Path(root) / fn
+                    try:
+                        st = p.stat()
+                    except OSError:
+                        continue
+                    if st.st_size > 8 * 1024 * 1024:
+                        continue
+                    try:
+                        mt = datetime.fromtimestamp(st.st_mtime)
+                    except (OSError, OverflowError, ValueError):
+                        continue
+                    if mt >= since:
+                        yield p, mt
+                        max_files -= 1
+                        if max_files <= 0:
+                            return
+        except (PermissionError, OSError):
+            continue
+
+
+def _sha256(path: Path, limit: int = 32 * 1024 * 1024) -> Optional[str]:
+    try:
+        if path.stat().st_size > limit:
+            return None
+        h = hashlib.sha256()
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+def scan_artifacts(
+    since: datetime | None = None, *, deep: bool = True, lib: IocLibrary | None = None
+) -> list[SuspiciousArtifact]:
+    """扫描入侵痕迹。
+
+    since 默认取 2026-10-20（漏洞披露窗口）之后的文件；deep=True 时做内容与哈希检查。
+    """
+    lib = lib or IocLibrary()
+    since = since or datetime(2026, 10, 20)
+    found: list[SuspiciousArtifact] = []
+
+    for path, mt in _iter_recent_files(_scan_dirs(), since):
+        try:
+            suffix = path.suffix.lower()
+        except OSError:
+            continue
+
+        # 1) 已知样本哈希
+        digest = _sha256(path)
+        if digest:
+            m = lib.match_hash(digest)
+            if m:
+                found.append(SuspiciousArtifact("known_malware", str(path), m.context, "critical", digest))
+                continue
+
+        # 2) 可执行/脚本后缀 + 在 PHP 相关目录
+        if suffix in {".php", ".phtml", ".phar", ".sh", ".bin", ".so"}:
+            found.append(SuspiciousArtifact(
+                "recent_script", str(path),
+                f"{suffix} 文件，修改时间 {mt.isoformat()}",
+                "medium", digest))
+            if deep:
+                try:
+                    content = path.read_text(errors="replace")[:200000]
+                except OSError:
+                    content = ""
+                for label, evidence in scan_webshell(content):
+                    found.append(SuspiciousArtifact("webshell", str(path),
+                                                    f"{label} | {evidence}", "critical", digest))
+                    break
+                for m in lib.match_text(content[:20000], context=str(path)):
+                    found.append(SuspiciousArtifact("ioc_in_file", str(path),
+                                                    f"{m.ioc_type}: {m.value}", "critical", digest))
+    return found
+
+
+def list_processes() -> list[str]:
+    """列出与 PHP 相关的进程，以及可疑伪装进程。"""
+    out: list[str] = []
+    try:
+        import psutil  # type: ignore
+
+        for p in psutil.process_iter(["pid", "name", "exe", "cmdline"]):
+            try:
+                name = (p.info.get("name") or "").lower()
+                exe = (p.info.get("exe") or "").lower()
+                cmd = " ".join(p.info.get("cmdline") or [])
+            except Exception:  # noqa: BLE001
+                continue
+            if "php" in name or "php" in exe or "php-fpm" in cmd:
+                out.append(f"pid={p.info.get('pid')} {name} {cmd[:200]}")
+            elif name in {"sysmon", "crong3-agent"}:
+                out.append(f"[SUSPICIOUS] pid={p.info.get('pid')} {name} {cmd[:200]}")
+        return out
+    except ImportError:
+        pass
+
+    # 无 psutil 时的降级实现
+    if IS_WINDOWS:
+        rc, out_text = _run(["tasklist", "/fo", "csv", "/nh"])
+    else:
+        rc, out_text = _run(["ps", "-eo", "pid,comm,args"])
+    for line in (out_text or "").splitlines():
+        low = line.lower()
+        if "php" in low or "sysmon" in low or "crong3-agent" in low:
+            out.append(line.strip()[:250])
+    return out
+
+
+def list_connections() -> list[str]:
+    """列出外部 TCP 连接，用于匹配 IOC C2。"""
+    lines: list[str] = []
+    if IS_WINDOWS:
+        rc, text = _run(["netstat", "-ano"])
+    else:
+        rc, text = _run(["ss", "-tunp"]) or _run(["netstat", "-tunp"])
+    for line in (text or "").splitlines():
+        if "ESTABLISHED" in line.upper() or "ESTAB" in line.upper():
+            lines.append(line.strip()[:250])
+    return lines
+
+
+def run_host_check(deep: bool = True) -> HostReport:
+    """执行完整的主机侧检测。"""
+    rep = HostReport(
+        hostname=platform.node(),
+        platform=f"{platform.system()} {platform.machine()}",
+        platform_release=platform.release(),
+        checked_at=datetime.now().isoformat(timespec="seconds"),
+    )
+    installs, errors = enumerate_php_installs()
+    rep.installs = installs
+    rep.errors.extend(errors)
+
+    default_exe = next((i.path for i in installs if i.is_default), None) or (
+        installs[0].path if installs else None
+    )
+    if default_exe:
+        rep.settings = check_settings(default_exe)
+
+    try:
+        rep.artifacts = scan_artifacts(deep=deep)
+    except Exception as exc:  # noqa: BLE001
+        rep.errors.append(f"痕迹扫描失败: {exc}")
+
+    try:
+        rep.processes = list_processes()
+    except Exception as exc:  # noqa: BLE001
+        rep.errors.append(f"进程枚举失败: {exc}")
+
+    try:
+        rep.connections = list_connections()
+    except Exception as exc:  # noqa: BLE001
+        rep.errors.append(f"连接枚举失败: {exc}")
+
+    return rep

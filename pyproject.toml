@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "p2s"
+version = "0.1.0"
+description = "php2shell (CVE-2026-109618 / CVE-2026-109619) detection & exposure assessment toolkit"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "p2s contributors" }]
+keywords = ["php", "security", "cve-2026-109618", "cve-2026-109619", "php2shell", "vulnerability-detection"]
+
+dependencies = [
+    "httpx>=0.24,<1",
+    "pyyaml>=6",
+    "jinja2>=3",
+]
+
+[project.optional-dependencies]
+console = ["fastapi>=0.110", "uvicorn>=0.27", "jinja2>=3", "pydantic>=2"]
+agent  = ["httpx>=0.24"]
+dev    = ["pytest>=7.4", "ruff>=0.4"]
+all    = ["fastapi>=0.110", "uvicorn>=0.27", "jinja2>=3", "pydantic>=2", "pytest>=7.4", "ruff>=0.4"]
+
+[project.scripts]
+p2s = "p2s.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+p2s = ["rules/*.yaml", "data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",
+    # 项目面向 Python 3.9，刻意保留 Optional[...] 写法以保证注解在 3.9 上语义一致
+    "UP007",
+    "UP045",
+]

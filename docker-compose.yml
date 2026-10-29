@@ -1,0 +1,32 @@
+# p2s 交付给客户的私有化部署编排
+#
+#   docker compose up -d          启动控制台
+#   浏览器打开 http://<host>:8080
+#
+# 数据落在 p2s_data 卷里（资产台账 + 扫描报告）。
+
+services:
+  console:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: p2s-console:0.1.0
+    container_name: p2s-console
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      P2S_DATA_DIR: /app/data
+      TZ: Asia/Shanghai
+    volumes:
+      - p2s_data:/app/data
+      # 只读挂载客户的日志目录，让控制台可直接分析日志文件
+      - ./logs:/app/logs:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx,sys;sys.exit(0 if httpx.get('http://127.0.0.1:8080/api/health',timeout=4).status_code==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  p2s_data:
