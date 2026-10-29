@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 import socket
 import ssl
+import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -50,6 +51,12 @@ TOP_PORTS: tuple[int, ...] = (
     587, 636, 993, 995, 1433, 1521, 2049, 2375, 3000, 3128, 3306, 3389, 4848,
     5432, 5672, 5900, 5985, 5986, 6379, 8000, 8008, 8080, 8081, 8088, 8443,
     8888, 9200, 9300, 27017, 28017, 50000,
+)
+
+#: 快速模式端口表：只保留最常见的服务端口
+FAST_PORT_SET: tuple[int, ...] = (
+    22, 80, 443, 445, 3389, 3306, 5432, 6379, 8080, 8443, 8888, 9090,
+    2000, 8000, 10000, 8081, 8088, 9000, 3000, 4243,
 )
 
 #: 完整端口表 = 通用 + 设备专属（去重排序）
@@ -348,7 +355,7 @@ UA_LADDER: tuple[str, ...] = (
 )
 
 #: 路径回退。设备根路径可能返回 4xx，真实入口往往在子路径。
-PATH_LADDER: tuple[str, ...] = ("/", "/index.html", "/login", "/cgi-bin/", "/webui/", "/ui/")
+PATH_LADDER: tuple[str, ...] = ("/", "/index.html", "/login")
 
 #: 视为"服务可用"的状态码
 _OK_STATUS = (200, 301, 302, 303, 307, 308, 401, 403)
@@ -361,6 +368,7 @@ def probe_http(
     https: bool = False,
     timeout: float = 8.0,
     paths: tuple[str, ...] = PATH_LADDER,
+    quick: bool = False,
 ) -> Optional[Service]:
     """HTTP/HTTPS 指纹采集。
 
@@ -372,21 +380,32 @@ def probe_http(
     best: Optional[httpx.Response] = None
     best_path = "/"
 
+    if quick:
+        paths = ("/",)
+    deadline = time.monotonic() + max(timeout * 2.5, 12.0)
     with httpx.Client(verify=False, timeout=timeout, follow_redirects=False) as client:
         for ua in UA_LADDER:
             for path in paths:
+                if time.monotonic() > deadline:
+                    break
                 url = f"{scheme}://{host}:{port}{path}"
                 try:
                     resp = client.get(url, headers={"User-Agent": ua, "Accept": "*/*"})
                 except Exception as exc:  # noqa: BLE001
                     svc.banner = f"{type(exc).__name__}: {str(exc)[:120]}"
-                    return svc
+                    if best is None:
+                        return svc
+                    continue
                 if best is None or (resp.status_code in _OK_STATUS and best.status_code not in _OK_STATUS):
                     best, best_path = resp, path
                 if resp.status_code in _OK_STATUS:
-                    best, best_path = resp, path
                     break
+            # 拿到可用响应就收工；只有全部路径都失败才换 UA 重试
             if best is not None and best.status_code in _OK_STATUS:
+                break
+            if quick:
+                break   # 快速模式不升级 UA
+            if best is not None and best.status_code not in (404, 400, 403, 405, 501):
                 break
 
     if best is None:
@@ -433,11 +452,13 @@ def probe_banner(host: str, port: int, timeout: float = 5.0) -> Optional[Service
     try:
         with socket.create_connection((host, port), timeout=timeout) as s:
             s.settimeout(timeout)
+            # FTP/SMTP/POP3/IMAP 都会在连接后主动发欢迎语。
+            # 不要先发 EHLO —— POP3/IMAP 收到非预期数据会直接丢弃，
+            # 导致这里白等到超时（每台带邮件服务的设备多花 4~5 秒）。
             try:
-                s.sendall(b"EHLO p2s\r\n")
-            except OSError:
-                pass
-            data = s.recv(512)
+                data = s.recv(512)
+            except (socket.timeout, TimeoutError):
+                data = b""
         svc.banner = data.decode("utf-8", errors="replace").strip()[:200]
         low = (svc.banner or "").lower()
         if low.startswith("ssh-"):
@@ -619,46 +640,73 @@ def discover(
         prof.errors.append("主机名含端口，请拆分后重试")
         return prof
 
-    port_list = list(ports) if ports is not None else list(FULL_PORT_SET)
-    open_ports = scan_ports(host, port_list, timeout=timeout)
+    if ports is not None:
+        port_list = list(ports)
+    elif not deep:
+        port_list = list(FAST_PORT_SET)
+    else:
+        port_list = list(FULL_PORT_SET)
+    open_ports = scan_ports(host, port_list, timeout=(timeout if deep else min(timeout, 0.8)))
     prof.open_ports = open_ports
     if not open_ports:
         prof.errors.append("端口探测无响应，主机可能离线或被防火墙拦截")
         return prof
     prof.alive = True
 
-    # 服务识别
+    # 服务识别（各端口并行，避免一台多端口设备串行等待）
     services: list[Service] = []
-    for p in open_ports:
-        if p in (22,):
-            services.append(probe_ssh(host, p, timeout=http_timeout))
-        elif p in WEB_HTTPS_PORTS:
-            svc = probe_http(host, p, https=True, timeout=http_timeout)
-            services.append(svc)
+
+    def _probe_port(p: int) -> Optional[Service]:
+        """探测单个端口的服务，返回 Service（失败返回 None）。"""
+        fast = not deep
+        if p == 22:
+            return probe_ssh(host, p, timeout=http_timeout)
+
+        if p in WEB_HTTPS_PORTS:
+            svc = probe_http(host, p, https=True, timeout=http_timeout, quick=fast)
+            if svc is None:
+                return None
+            if fast:
+                return svc
             subject, issuer, san, expired = _tls_info(host, p, timeout=http_timeout)
-            if svc is not None:
-                svc.tls_subject, svc.tls_issuer, svc.tls_san, svc.tls_expired = subject, issuer, san, expired
-                if subject:
-                    svc.proto = "https"
-        elif p in AMBIGUOUS_WEB_PORTS:
+            svc.tls_subject, svc.tls_issuer, svc.tls_san, svc.tls_expired = subject, issuer, san, expired
+            if subject:
+                svc.proto = "https"
+            return svc
+
+        if p in AMBIGUOUS_WEB_PORTS:
             # 安全设备常把管理界面挂在非标准端口，且默认走 TLS
-            svc = probe_http(host, p, https=True, timeout=http_timeout)
-            if svc is not None and svc.http_status in (400, 404, 405, 501) and not svc.tls_subject:
+            svc = probe_http(host, p, https=True, timeout=http_timeout, quick=fast)
+            if svc is None:
+                return None
+            if fast:
+                return svc
+            if svc.http_status in (400, 404, 405, 501) and not svc.tls_subject:
                 alt = probe_http(host, p, https=False, timeout=http_timeout)
                 if alt is not None and alt.http_status in _OK_STATUS:
                     svc = alt
-            if svc is not None and svc.http_status in _OK_STATUS and svc.proto == "https":
+            if svc.http_status in _OK_STATUS and svc.proto == "https":
                 subject, issuer, san, expired = _tls_info(host, p, timeout=http_timeout)
                 svc.tls_subject, svc.tls_issuer, svc.tls_san, svc.tls_expired = subject, issuer, san, expired
-            services.append(svc)
-        elif p in WEB_HTTP_PORTS:
-            services.append(probe_http(host, p, https=False, timeout=http_timeout))
-        elif p in (21, 25, 110, 143, 465, 587, 993):
-            services.append(probe_banner(host, p, timeout=http_timeout))
-        else:
-            services.append(probe_banner(host, p, timeout=min(http_timeout, 4.0)))
-    prof.services = [s for s in services if s is not None]
+            return svc
 
+        if p in WEB_HTTP_PORTS:
+            return probe_http(host, p, https=False, timeout=http_timeout, quick=fast)
+
+        # banner 类服务都会在连接后立刻发欢迎语；1.5s 没数据基本是 tarpit/静默端口
+        return probe_banner(host, p, timeout=min(http_timeout, 1.5))
+
+    with ThreadPoolExecutor(max_workers=min(12, max(1, len(open_ports)))) as ex:
+        futs = {ex.submit(_probe_port, p): p for p in open_ports}
+        for f in as_completed(futs):
+            try:
+                svc = f.result()
+            except Exception:
+                svc = None
+            if svc is not None:
+                services.append(svc)
+    services.sort(key=lambda s: s.port)
+    prof.services = [s for s in services if s is not None]
     # 设备分类
     cls = classify_device(prof.services, prof.open_ports)
     prof.device_type = cls["device_type"]
