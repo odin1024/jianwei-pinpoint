@@ -1,5 +1,6 @@
 """p2s 命令行入口。
 
+    p2s discover --host 192.168.1.1 --report out/    # 设备发现（端口/类型/PHP 暴露面）
     p2s assets   --file hosts.txt --report out/       # 资产测绘 + 版本判定
     p2s probe    --file hosts.txt --report out/       # 资产测绘 + 主动探测
     p2s logs     --file access.log --report out/      # 被动日志检测
@@ -17,7 +18,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from .core import hostcheck, logscan
+from .core import discovery, hostcheck, logscan
 from .core import ioc as ioc_mod
 from .core import probe as probe_mod
 from .core import report as report_mod
@@ -74,6 +75,68 @@ def _emit(result: report_mod.ScanResult, outdir: str | None, quiet: bool) -> Non
 
 
 # --------------------------------------------------------------------------
+def cmd_discover(args: argparse.Namespace) -> int:
+    """设备发现：端口 -> 服务 -> 设备类型 -> PHP 暴露面。"""
+    hosts = _read_hosts(args.file, args.host)
+    if args.cidr:
+        hosts.extend(_expand_cidr(args.cidr))
+    hosts = [h for h in hosts if h]
+
+    res = report_mod.ScanResult(
+        scan_id=f"disc-{uuid.uuid4().hex[:10]}", kind="discover", started_at=_now()
+    )
+    res.target_count = len(hosts)
+    for h in hosts:
+        prof = discovery.discover(
+            h,
+            timeout=args.timeout,
+            http_timeout=args.http_timeout,
+            deep=not args.quick,
+        )
+        res.assets.append(prof.to_dict())
+        for e in prof.errors:
+            res.errors.append(f"{h}: {e}")
+
+    if not args.quiet:
+        print(f"\n发现完成 [{res.scan_id}]  目标={len(hosts)}")
+        by_type: dict[str, int] = {}
+        for a in res.assets:
+            by_type[a.get("device_label", "?")] = by_type.get(a.get("device_label", "?"), 0) + 1
+        print("  设备类型分布: " + ("  ".join(f"{k}×{v}" for k, v in sorted(by_type.items(), key=lambda x: -x[1])) or "-"))
+        for a in res.assets:
+            mark = {"critical": "[!]", "medium": "[~]", "low": "[ ]"}.get(a.get("risk", ""), "[?]")
+            print(f"  {mark} {a.get('host'):<24} {a.get('device_label'):<22} "
+                  f"PHP={a.get('php_version') or ('无' if a.get('exposure') == 'not_php' else '?')} "
+                  f"暴露={a.get('exposure')} 置信={a.get('confidence')}")
+            print(f"        端口: {a.get('open_ports')}")
+            for ev in a.get("evidence", [])[:6]:
+                print(f"        · {ev}")
+
+    if args.report:
+        d = Path(args.report)
+        d.mkdir(parents=True, exist_ok=True)
+        base = d / res.scan_id
+        report_mod.to_json(res, base.with_suffix(".json"))
+        report_mod.to_markdown(res, base.with_suffix(".md"))
+        report_mod.to_html(res, base.with_suffix(".html"))
+        if not args.quiet:
+            print(f"\n报告已生成:\n  {base}.json\n  {base}.md\n  {base}.html")
+    return 0
+
+
+def _expand_cidr(cidr: str) -> list[str]:
+    """把 CIDR 展开成主机列表（跳过网络号与广播地址）。"""
+    import ipaddress
+
+    try:
+        net = ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return []
+    if net.num_addresses > 1024:
+        return []
+    return [str(h) for h in net.hosts()]
+
+
 def cmd_assets(args: argparse.Namespace) -> int:
     hosts = _read_hosts(args.file, args.url)
     res = report_mod.ScanResult(scan_id=f"assets-{uuid.uuid4().hex[:10]}", kind="assets", started_at=_now())
@@ -224,6 +287,16 @@ def build_parser() -> argparse.ArgumentParser:
     def add_report(sp):
         sp.add_argument("--report", help="报告输出目录（会生成 json/md/html 三份）")
         sp.add_argument("--quiet", action="store_true", help="只输出报告路径")
+
+    sp = sub.add_parser("discover", help="设备发现：端口 + 服务 + 设备类型 + PHP 暴露面")
+    sp.add_argument("--host", action="append", help="单个主机 IP（可重复）")
+    sp.add_argument("--file", help="主机列表文件")
+    sp.add_argument("--cidr", help="网段，例如 192.168.1.0/24（最大 1024 台）")
+    sp.add_argument("--timeout", type=float, default=1.2, help="TCP 探测超时")
+    sp.add_argument("--http-timeout", type=float, default=8.0, help="HTTP 探测超时")
+    sp.add_argument("--quick", action="store_true", help="跳过 HTTP 深度识别")
+    add_report(sp)
+    sp.set_defaults(func=cmd_discover)
 
     sp = sub.add_parser("assets", help="资产测绘：版本识别 + 修复状态判定")
     sp.add_argument("--file", help="主机/URL 列表文件")

@@ -1,15 +1,15 @@
-"""p2s Web 控制台（FastAPI）。
+"""p2s Web 控制台 API（FastAPI）。
 
 形态定位：给客户交付时的主要交互界面。
-  - 资产台账：集中管理目标、分组、责任人、修复状态
-  - 扫描编排：网页发起资产测绘 / 主动探测 / 日志检测 / 主机侧检测
-  - 报告中心：一键生成 JSON / Markdown / HTML 报告，可直接发给客户
-  - 规则与 IOC：内置规则库与 IOC 库，支持导出
-
-开发期： p2s serve --port 18080
+  - 总览：全局风险视图
+  - 设备发现：网段/批量主机 -> 设备类型 + PHP 暴露面
+  - 资产台账：设备画像持久化、分组、负责人、导出
+  - PHP 暴露面：只看跑 PHP 的资产，版本 vs 修复基线矩阵
+  - 日志分析 / 主机侧 / 规则中心 / IOC 中心 / 报告中心
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import threading
@@ -22,17 +22,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel
 
-from ..core import hostcheck, logscan
+from ..core import discovery, hostcheck, logscan
 from ..core import probe as probe_mod
 from ..core import report as report_mod
 from ..core.ioc import IocLibrary
 from ..core.rules import RULES, coverage_report
-from ..core.versions import classify
+from ..core.versions import FIXED_RELEASES, classify
+from .ui import DASHBOARD_HTML
 
 app = FastAPI(
     title="p2s — php2shell 检测控制台",
     description="CVE-2026-109618 / CVE-2026-109619 检测与暴露面评估",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 DATA_DIR = Path(os.environ.get("P2S_DATA_DIR", "./p2s-data"))
@@ -61,7 +62,9 @@ def _save_assets(assets: list[dict]) -> None:
 
 def _new_scan(kind: str) -> report_mod.ScanResult:
     return report_mod.ScanResult(
-        scan_id=f"{kind}-{uuid.uuid4().hex[:10]}", kind=kind, started_at=datetime.now().isoformat(timespec="seconds")
+        scan_id=f"{kind}-{uuid.uuid4().hex[:10]}",
+        kind=kind,
+        started_at=datetime.now().isoformat(timespec="seconds"),
     )
 
 
@@ -74,14 +77,60 @@ def _persist(res: report_mod.ScanResult) -> None:
     res.finished_at = datetime.now().isoformat(timespec="seconds")
 
 
+def _asset_from_profile(prof: discovery.DeviceProfile, group: str, owner: str, note: str) -> dict:
+    return {
+        "id": uuid.uuid4().hex[:12],
+        "host": prof.host,
+        "group": group,
+        "owner": owner,
+        "note": note,
+        "alive": prof.alive,
+        "device_type": prof.device_type,
+        "device_label": prof.device_label,
+        "vendor": prof.vendor,
+        "os_hint": prof.os_hint,
+        "open_ports": prof.open_ports,
+        "services": [s.to_dict() for s in prof.services],
+        "php_present": prof.php_present,
+        "php_version": prof.php_version,
+        "sapi": prof.sapi,
+        "exposure": prof.exposure,
+        "risk": prof.risk,
+        "confidence": prof.confidence,
+        "evidence": prof.evidence,
+        "remediation": prof.remediation,
+        "errors": prof.errors,
+        "last_checked": prof.scanned_at,
+    }
+
+
 # --------------------------------------------------------------------------
-# API 模型
+# 模型
 # --------------------------------------------------------------------------
-class AssetIn(BaseModel):
-    url: str
+class DiscoverIn(BaseModel):
+    hosts: list[str] = []
+    cidr: str = ""
     group: str = "default"
     owner: str = ""
     note: str = ""
+    timeout: float = 1.2
+    http_timeout: float = 8.0
+    quick: bool = False
+    save: bool = True
+
+
+class AssetIn(BaseModel):
+    host: str
+    group: str = "default"
+    owner: str = ""
+    note: str = ""
+    discover: bool = True
+
+
+class ImportIn(BaseModel):
+    text: str
+    group: str = "default"
+    owner: str = ""
 
 
 class UrlScanIn(BaseModel):
@@ -92,7 +141,6 @@ class UrlScanIn(BaseModel):
 
 class LogScanIn(BaseModel):
     path: str
-    group: str = "default"
 
 
 class AgentReportIn(BaseModel):
@@ -100,34 +148,108 @@ class AgentReportIn(BaseModel):
     data: dict[str, Any] = {}
 
 
+def _expand_cidr(cidr: str, limit: int = 1024) -> list[str]:
+    try:
+        net = ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return []
+    if net.num_addresses > limit:
+        raise HTTPException(status_code=400, detail=f"网段过大（{net.num_addresses} 台），上限 {limit} 台")
+    return [str(h) for h in net.hosts()]
+
+
 # --------------------------------------------------------------------------
-# API
+# 总览
 # --------------------------------------------------------------------------
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "time": datetime.now().isoformat(timespec="seconds")}
+    return {"status": "ok", "time": datetime.now().isoformat(timespec="seconds"), "version": "0.2.0"}
 
 
-@app.get("/api/rules")
-def api_rules() -> dict:
+@app.get("/api/overview")
+def api_overview() -> dict:
+    assets = _load_assets()
+    scans: list[dict] = []
+    if SCANS_DIR.exists():
+        for p in sorted(SCANS_DIR.glob("*.json")):
+            try:
+                scans.append(json.loads(p.read_text(encoding="utf-8")))
+            except json.JSONDecodeError:
+                continue
+
+    by_type: dict[str, int] = {}
+    by_exposure: dict[str, int] = {}
+    by_risk: dict[str, int] = {"critical": 0, "medium": 0, "low": 0}
+    php_versions: dict[str, int] = {}
+    for a in assets:
+        by_type[a.get("device_label", "未识别设备")] = by_type.get(a.get("device_label", "未识别设备"), 0) + 1
+        exp = a.get("exposure", "unknown")
+        by_exposure[exp] = by_exposure.get(exp, 0) + 1
+        r = a.get("risk", "low")
+        by_risk[r] = by_risk.get(r, 0) + 1
+        if a.get("php_version"):
+            php_versions[a["php_version"]] = php_versions.get(a["php_version"], 0) + 1
+
     return {
-        "count": len(RULES),
-        "rules": [r.to_dict() for r in RULES],
+        "total_assets": len(assets),
+        "alive": sum(1 for a in assets if a.get("alive")),
+        "php_present": sum(1 for a in assets if a.get("php_present")),
+        "exposed": sum(1 for a in assets if a.get("exposure") == "exposed"),
+        "patched": sum(1 for a in assets if a.get("exposure") == "patched"),
+        "not_php": sum(1 for a in assets if a.get("exposure") == "not_php"),
+        "unknown": sum(1 for a in assets if a.get("exposure") == "unknown"),
+        "by_type": by_type,
+        "by_exposure": by_exposure,
+        "by_risk": by_risk,
+        "php_versions": php_versions,
+        "fixed_releases": FIXED_RELEASES,
+        "scan_count": len(scans),
+        "recent_scans": scans[:8],
+        "groups": sorted({a.get("group", "default") for a in assets}),
     }
 
 
-@app.get("/api/ioc")
-def api_ioc() -> dict:
-    lib = IocLibrary()
-    return {
-        "summary": lib.summary(),
-        "ips": list(lib.ips),
-        "domains": list(lib.domains),
-        "urls": list(lib.urls),
-        "hashes": lib.hashes,
-    }
+# --------------------------------------------------------------------------
+# 设备发现
+# --------------------------------------------------------------------------
+@app.post("/api/discover")
+def api_discover(body: DiscoverIn) -> dict:
+    hosts = [h.strip() for h in body.hosts if h and h.strip()]
+    if body.cidr:
+        hosts.extend(_expand_cidr(body.cidr))
+    hosts = list(dict.fromkeys(hosts))
+    if not hosts:
+        raise HTTPException(status_code=400, detail="请提供主机或网段")
+
+    profiles: list[dict] = []
+    for h in hosts:
+        prof = discovery.discover(
+            h, timeout=body.timeout, http_timeout=body.http_timeout, deep=not body.quick
+        )
+        profiles.append(_asset_from_profile(prof, body.group, body.owner, body.note))
+
+    if body.save and profiles:
+        with _lock:
+            assets = _load_assets()
+            by_host = {a["host"]: a for a in assets}
+            for pr in profiles:
+                old = by_host.get(pr["host"])
+                if old:
+                    pr.update({"id": old["id"], "group": old.get("group", body.group),
+                               "owner": old.get("owner", body.owner)})
+                by_host[pr["host"]] = pr
+            _save_assets(list(by_host.values()))
+
+    res = _new_scan("discover")
+    res.target_count = len(profiles)
+    res.assets = profiles
+    _persist(res)
+    return {"scan_id": res.scan_id, "count": len(profiles), "assets": profiles}
 
 
+# --------------------------------------------------------------------------
+# 资产台账
+# --------------------------------------------------------------------------
 @app.get("/api/assets")
 def api_assets() -> dict:
     return {"assets": _load_assets()}
@@ -135,39 +257,143 @@ def api_assets() -> dict:
 
 @app.post("/api/assets")
 def api_add_asset(body: AssetIn) -> dict:
-    url = body.url if body.url.startswith("http") else f"http://{body.url}"
-    fp = probe_mod.fingerprint(url, timeout=10)
-    vv = classify(fp.php_version)
+    host = body.host.strip()
+    if not host:
+        raise HTTPException(status_code=400, detail="主机不能为空")
+    prof = discovery.discover(host, timeout=1.2, http_timeout=8.0)
+    rec = _asset_from_profile(prof, body.group, body.owner, body.note)
     with _lock:
         assets = _load_assets()
-        assets = [a for a in assets if a.get("url") != url]
-        assets.append({
-            "url": url,
-            "group": body.group,
-            "owner": body.owner,
-            "note": body.note,
-            "php_version": fp.php_version,
-            "sapi": fp.sapi,
-            "sapi_label": fp.sapi_label,
-            "status": vv.status,
-            "needs_action": vv.needs_action,
-            "reason": vv.reason,
-            "last_checked": datetime.now().isoformat(timespec="seconds"),
-        })
+        assets = [a for a in assets if a.get("host") != host]
+        assets.append(rec)
         _save_assets(assets)
-    return {"ok": True, "total": len(assets)}
+    return {"ok": True, "asset": rec, "total": len(assets)}
+
+
+@app.post("/api/assets/import")
+def api_import_assets(body: ImportIn) -> dict:
+    hosts = [h.strip() for h in body.text.replace(",", "\n").splitlines() if h.strip() and not h.startswith("#")]
+    hosts = list(dict.fromkeys(hosts))
+    if not hosts:
+        raise HTTPException(status_code=400, detail="没有解析到有效主机")
+    added = 0
+    with _lock:
+        assets = _load_assets()
+        by_host = {a["host"]: a for a in assets}
+        for h in hosts:
+            if h in by_host:
+                continue
+            prof = discovery.discover(h, timeout=1.0, http_timeout=6.0, deep=False)
+            by_host[h] = _asset_from_profile(prof, body.group, body.owner, "")
+            added += 1
+        _save_assets(list(by_host.values()))
+    return {"ok": True, "added": added, "total": len(by_host)}
 
 
 @app.delete("/api/assets")
-def api_del_asset(url: str) -> dict:
+def api_del_asset(host: str) -> dict:
     with _lock:
         assets = _load_assets()
         before = len(assets)
-        assets = [a for a in assets if a.get("url") != url]
+        assets = [a for a in assets if a.get("host") != host]
         _save_assets(assets)
-    return {"ok": True, "removed": before - len(assets)}
+    return {"ok": True, "removed": before - len(assets), "total": len(assets)}
 
 
+@app.patch("/api/assets")
+def api_update_asset(payload: dict) -> dict:
+    host = payload.get("host")
+    if not host:
+        raise HTTPException(status_code=400, detail="缺少 host")
+    with _lock:
+        assets = _load_assets()
+        found = False
+        for a in assets:
+            if a.get("host") == host:
+                for k in ("group", "owner", "note"):
+                    if k in payload:
+                        a[k] = payload[k]
+                found = True
+        _save_assets(assets)
+    if not found:
+        raise HTTPException(status_code=404, detail="资产不存在")
+    return {"ok": True}
+
+
+@app.post("/api/assets/rescan")
+def api_rescan(body: dict) -> dict:
+    host = body.get("host")
+    if not host:
+        raise HTTPException(status_code=400, detail="缺少 host")
+    prof = discovery.discover(host, timeout=1.2, http_timeout=8.0)
+    rec = _asset_from_profile(prof, body.get("group", "default"), body.get("owner", ""), body.get("note", ""))
+    with _lock:
+        assets = _load_assets()
+        out = []
+        replaced = False
+        for a in assets:
+            if a.get("host") == host:
+                rec["id"] = a.get("id", rec["id"])
+                rec["group"] = a.get("group", rec["group"])
+                rec["owner"] = a.get("owner", rec["owner"])
+                out.append(rec)
+                replaced = True
+            else:
+                out.append(a)
+        if not replaced:
+            out.append(rec)
+        _save_assets(out)
+    return {"ok": True, "asset": rec}
+
+
+@app.get("/api/assets/export")
+def api_export_assets() -> str:
+    assets = _load_assets()
+    rows = ["host,device_type,device_label,vendor,php_present,php_version,sapi,exposure,risk,open_ports"]
+    for a in assets:
+        rows.append(
+            ",".join(
+                str(x).replace(",", " ") for x in [
+                    a.get("host", ""), a.get("device_type", ""), a.get("device_label", ""),
+                    a.get("vendor") or "", a.get("php_present"), a.get("php_version") or "",
+                    a.get("sapi") or "", a.get("exposure", ""), a.get("risk", ""),
+                    " ".join(str(p) for p in a.get("open_ports", [])),
+                ]
+            )
+        )
+    return "\n".join(rows)
+
+
+# --------------------------------------------------------------------------
+# PHP 暴露面
+# --------------------------------------------------------------------------
+@app.get("/api/php-exposure")
+def api_php_exposure() -> dict:
+    assets = [a for a in _load_assets() if a.get("php_present")]
+    rows = []
+    for a in assets:
+        v = classify(a.get("php_version")) if a.get("php_version") else None
+        rows.append({
+            "host": a.get("host"),
+            "device_label": a.get("device_label"),
+            "php_version": a.get("php_version"),
+            "sapi": a.get("sapi"),
+            "status": v.status if v else "unknown",
+            "fixed_release": v.fixed_release if v else None,
+            "reason": v.reason if v else "未能确定版本",
+            "exposure": a.get("exposure"),
+            "risk": a.get("risk"),
+            "owner": a.get("owner", ""),
+            "group": a.get("group", ""),
+            "remediation": a.get("remediation", []),
+        })
+    rows.sort(key=lambda r: ({"critical": 0, "medium": 1, "low": 2}.get(r.get("risk", "low"), 3), r.get("host") or ""))
+    return {"rows": rows, "fixed_releases": FIXED_RELEASES}
+
+
+# --------------------------------------------------------------------------
+# 扫描
+# --------------------------------------------------------------------------
 @app.post("/api/scan/url")
 def api_scan_url(body: UrlScanIn) -> dict:
     url = body.url if body.url.startswith("http") else f"http://{body.url}"
@@ -208,17 +434,106 @@ def api_scan_host() -> dict:
     for a in rep.artifacts:
         res.findings.append({
             "rule_id": "P2S-HOST-001",
-            "rule_name": f"主机侧痕迹: {a.kind}",
-            "severity": a.severity,
+            "rule_name": f"主机侧痕迹: {a.get('kind')}",
+            "severity": a.get("severity", "medium"),
             "dimension": "host",
             "cves": list(("CVE-2026-109618", "CVE-2026-109619")),
             "ts": rep.checked_at,
             "ip": rep.hostname,
-            "uri": a.path,
-            "evidence": a.detail,
+            "uri": a.get("path"),
+            "evidence": a.get("detail"),
         })
     _persist(res)
     return res.to_dict()
+
+
+# --------------------------------------------------------------------------
+# 规则 / IOC / 报告
+# --------------------------------------------------------------------------
+@app.get("/api/rules")
+def api_rules() -> dict:
+    return {"count": len(RULES), "rules": [r.to_dict() for r in RULES]}
+
+
+@app.get("/api/rules/export/{fmt}")
+def api_rules_export(fmt: str) -> str:
+    """导出规则：sigma / modsecurity / suricata。"""
+    if fmt == "sigma":
+        out: list[str] = []
+        for r in RULES:
+            out.append(f"""---
+title: {r.name}
+id: {uuid.uuid5(uuid.NAMESPACE_DNS, r.id).hex}
+status: experimental
+description: >
+  {r.description}
+author: p2s
+date: {datetime.now().date().isoformat()}
+logsource:
+  category: webserver
+detection:
+  selection:
+    keyword:
+{chr(10).join('      - ' + k for k in ['PHP_SESSION_UPLOAD_PROGRESS', 'PHPSESSID', '<?php', '|O:', 'chunked', 'sess_', 'Allowed memory size', 'Session object destruction failed', 'php2shell'])}
+  condition: selection
+level: {r.severity}
+tags:
+  - cve.2026.109618
+  - cve.2026.109619
+""")
+        return "\n".join(out)
+
+    if fmt == "modsecurity":
+        lines = [
+            "# p2s — php2shell ModSecurity 规则",
+            "# 放置到 modsecurity conf.d 目录后 reload 即可",
+            "",
+            'SecRule REQUEST_METHOD "POST" \\',
+            '    "id:9900100,phase:2,deny,status:403,log,',
+            "    msg:'p2s: php2shell upload_progress 探测',",
+            "    tag:'CVE-2026-109618',tag:'CVE-2026-109619',severity:'CRITICAL',chain'",
+            '    SecRule REQUEST_BODY "@contains PHP_SESSION_UPLOAD_PROGRESS" \\',
+            '        "chain"',
+            '        SecRule REQUEST_HEADERS:Content-Type "@contains multipart/form-data"',
+            "",
+            'SecRule MULTIPART_FILENAME "@rx <\\?(?:php|=)" \\',
+            '    "id:9900102,phase:2,deny,status:403,log,',
+            "    msg:'p2s: 上传文件名含 PHP 代码',severity:'CRITICAL'",
+            "",
+            'SecRule MULTIPART_FILENAME "@rx \\|(?:O|C|a|r):\\d+:" \\',
+            '    "id:9900103,phase:2,deny,status:403,log,',
+            "    msg:'p2s: 上传文件名含序列化对象',severity:'CRITICAL'",
+            "",
+            'SecRule RESPONSE_BODY "@contains Session object destruction failed" \\',
+            '    "id:9900105,phase:4,log,pass,',
+            "    msg:'p2s: 会话销毁失败（陈旧状态利用证据）',severity:'CRITICAL'",
+        ]
+        return "\n".join(lines)
+
+    if fmt == "suricata":
+        lines = ["# p2s — php2shell Suricata 规则"]
+        for i, r in enumerate(RULES):
+            lines.append(
+                f'alert http any any -> any any (msg:"p2s {r.id} {r.name}"; '
+                f'flow:established,to_server; content:"PHP_SESSION_UPLOAD_PROGRESS"; '
+                f"nocase; classtype:{r.severity}; sid:9900{100 + i}; rev:1;)"
+            )
+        return "\n".join(lines)
+
+    raise HTTPException(status_code=400, detail="仅支持 sigma / modsecurity / suricata")
+
+
+@app.get("/api/ioc")
+def api_ioc() -> dict:
+    lib = IocLibrary()
+    return {
+        "summary": lib.summary(),
+        "ips": list(lib.ips),
+        "domains": list(lib.domains),
+        "urls": list(lib.urls),
+        "hashes": lib.hashes,
+        "user_agents": list(lib.user_agents),
+    }
 
 
 @app.get("/api/scans")
@@ -245,7 +560,6 @@ def api_report(scan_id: str, fmt: str = "md") -> str:
 
 @app.post("/api/agent/report")
 def api_agent_report(body: AgentReportIn) -> dict:
-    """接收 Agent 上报的主机侧检测结果。"""
     res = _new_scan("agent")
     res.target_count = 1
     data = body.data or {}
@@ -268,179 +582,8 @@ def api_agent_report(body: AgentReportIn) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Dashboard
+# 界面
 # --------------------------------------------------------------------------
-_DASH = """<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>p2s 控制台</title>
-<style>
-:root{--bg:#0d0f14;--panel:#151922;--line:#222836;--fg:#e8eaed;--dim:#8b93a1;--acc:#4c8dff}
-*{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
-header{padding:18px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;background:var(--panel)}
-header h1{font-size:17px;margin:0;font-weight:600}
-header .tag{font-size:11px;color:#0d0f14;background:#ff9f43;padding:2px 8px;border-radius:20px;font-weight:600}
-header .sp{flex:1}
-nav{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--line);background:var(--panel)}
-nav button{background:none;border:none;color:var(--dim);padding:12px 16px;cursor:pointer;font-size:13px;border-bottom:2px solid transparent}
-nav button.on{color:var(--fg);border-bottom-color:var(--acc)}
-main{padding:24px 28px;max-width:1400px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:22px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
-.card .k{color:var(--dim);font-size:12px}.card .v{font-size:24px;font-weight:600;margin-top:4px}
-.panel{background:var(--panel);border:1px solid varline;border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:18px}
-h2{font-size:15px;margin:0 0 14px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
-th{color:var(--dim);font-weight:500;font-size:12px}
-input,select,textarea{background:#0f1218;border:1px solid var(--line);color:var(--fg);padding:8px 10px;border-radius:6px;font-size:13px;font-family:inherit}
-button.act{background:var(--acc);color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500}
-button.ghost{background:none;border:1px solid var(--line);color:var(--fg);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px}
-.risk-critical{color:#ff6b6b;font-weight:700}.risk-high{color:#ffa94d;font-weight:700}.risk-medium{color:#ffd43b}.risk-low{color:#69db7c}.risk-unknown{color:var(--dim)}
-.sev-critical{color:#ff6b6b}.sev-high{color:#ffa94d}.sev-medium{color:#ffd43b}.sev-low{color:#8b93a1}.sev-info{color:#8b93a1}
-pre{background:#0f1218;border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto;max-height:520px;font-size:12px;line-height:1.55}
-.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
-.tagline{color:var(--dim);font-size:12px}
-.alert{background:#1f1420;border:1px solid #4a2540;border-radius:8px;padding:12px 14px;font-size:13px;color:#e8c8e0;margin-bottom:18px}
-</style></head><body>
-<header><h1>p2s 控制台</h1><span class="tag">php2shell</span>
-<span class="sp"></span><span class="tagline" id="clock"></span></header>
-<nav>
- <button class="on" data-tab="dash">总览</button>
- <button data-tab="assets">资产台账</button>
- <button data-tab="scan">扫描</button>
- <button data-tab="host">主机侧</button>
- <button data-tab="rules">规则 / IOC</button>
-</nav>
-<main>
-<div class="alert"><b>修复基线：</b>PHP <b>8.5.12 / 8.4.27 / 8.3.36 / 8.2.35</b>（CVE-2026-109618 / CVE-2026-109619，已被 CISA 列入 KEV）。
-唯一完整修复是升级并重启全部 PHP worker。</div>
-
-<section id="dash">
- <div class="cards">
-  <div class="card"><div class="k">资产总数</div><div class="v" id="c-asset">-</div></div>
-  <div class="card"><div class="k">需处置</div><div class="v risk-critical" id="c-risk">-</div></div>
-  <div class="card"><div class="k">严重命中</div><div class="v sev-critical" id="c-crit">-</div></div>
-  <div class="card"><div class="k">高危命中</div><div class="v sev-high" id="v-high">-</div></div>
-  <div class="card"><div class="k">规则数</div><div class="v" id="c-rules">-</div></div>
- </div>
- <div class="panel"><h2>最近扫描</h2><table id="t-scans"><thead><tr><th>扫描 ID</th><th>类型</th><th>风险</th><th>目标</th><th>严重</th><th>高危</th><th>开始时间</th></tr></thead><tbody></tbody></table></div>
-</section>
-
-<section id="assets" style="display:none">
- <div class="panel">
-  <h2>添加资产</h2>
-  <div class="row">
-   <input id="a-url" placeholder="https://example.com 或 10.0.0.5" style="min-width:300px">
-   <input id="a-group" placeholder="分组" value="default">
-   <input id="a-owner" placeholder="负责人">
-   <button class="act" onclick="addAsset()">添加并识别</button>
-  </div>
-  <div class="tagline">添加时会立即做一次版本指纹采集（只读）。</div>
- </div>
- <div class="panel"><h2>资产列表</h2><table id="t-assets"><thead><tr><th>URL</th><th>PHP</th><th>SAPI</th><th>状态</th><th>分组</th><th>负责人</th><th>操作</th></tr></thead><tbody></tbody></table></div>
-</section>
-
-<section id="scan" style="display:none">
- <div class="panel"><h2>主动扫描（安全探针）</h2>
-  <div class="row"><input id="s-url" placeholder="https://example.com" style="min-width:320px">
-  <label class="tagline"><input type="checkbox" id="s-probe" checked> 发送无害探针</label>
-  <button class="act" onclick="scanUrl()">开始</button></div>
-  <div class="tagline">探针只发送最小无害请求以触发可观测差异，不含任何利用载荷。</div>
- </div>
- <div class="panel"><h2>被动日志检测</h2>
-  <div class="row"><input id="s-log" placeholder="日志文件绝对路径" style="min-width:320px">
-  <button class="act" onclick="scanLogs()">分析</button></div>
-  <div class="tagline">零风险。规则覆盖情况会在结果中标注。</div>
- </div>
- <div class="panel"><h2>结果</h2><pre id="scan-out">（尚未执行）</pre></div>
-</section>
-
-<section id="host" style="display:none">
- <div class="panel"><h2>本机主机侧检测</h2>
-  <div class="row"><button class="act" onclick="hostCheck()">执行主机侧检测</button>
-  <span class="tagline">检查 PHP 安装点、生效配置、可疑文件、已知样本哈希、进程与连接</span></div>
- </div>
- <div class="panel"><pre id="host-out">（尚未执行）</pre></div>
-</section>
-
-<section id="rules" style="display:none">
- <div class="panel"><h2>检测规则</h2><table id="t-rules"><thead><tr><th>ID</th><th>名称</th><th>等级</th><th>维度</th><th>需要字段</th><th>CVE</th></tr></thead><tbody></tbody></table></div>
- <div class="panel"><h2>IOC 库</h2><pre id="ioc-out">（加载中）</pre></div>
-</section>
-</main>
-<script>
-const $=(s)=>document.querySelector(s);
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on');
-  document.querySelectorAll('section').forEach(s=>s.style.display='none');
-  $('#'+b.dataset.tab).style.display='block';
-  if(b.dataset.tab==='dash')loadDash();
-  if(b.dataset.tab==='assets')loadAssets();
-  if(b.dataset.tab==='rules')loadRules();
-});
-async function api(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(r.status+' '+(await r.text()));return r.json()}
-function esc(s){return String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
-async function loadDash(){
-  const a=await api('/api/assets');const assets=a.assets||[];
-  const s=await api('/api/scans');const scans=s.scans||[];
-  $('#c-asset').textContent=assets.length;
-  $('#c-risk').textContent=assets.filter(x=>x.needs_action).length;
-  let crit=0,high=0;scans.forEach(x=>{crit+=x.severity_counts?.critical||0;high+=x.severity_counts?.high||0});
-  $('#c-crit').textContent=crit;$('#v-high').textContent=high;
-  const r=await api('/api/rules');$('#c-rules').textContent=r.count;
-  $('#t-scans tbody').innerHTML=scans.map(x=>`<tr>
-   <td><a href="#" onclick="showReport('${x.scan_id}')">${esc(x.scan_id)}</a></td>
-   <td>${esc(x.kind)}</td><td class="risk-${esc(x.risk)}">${esc(x.risk).toUpperCase()}</td>
-   <td>${x.target_count}</td><td class="sev-critical">${x.severity_counts?.critical||0}</td>
-   <td class="sev-high">${x.severity_counts?.high||0}</td><td>${esc(x.started_at)}</td></tr>`).join('')
-   ||'<tr><td colspan=7 class=tagline>暂无扫描记录</td></tr>';
-}
-async function showReport(id){const t=await (await fetch(`/api/scans/${id}/report?fmt=md`)).text();$('#scan-out').textContent=t;
-  document.querySelector('nav button[data-tab=scan]').click();}
-async function loadAssets(){
-  const a=await api('/api/assets');
-  $('#t-assets tbody').innerHTML=(a.assets||[]).map(x=>`<tr>
-   <td>${esc(x.url)}</td><td>${esc(x.php_version||'-')}</td><td>${esc(x.sapi_label||'-')}</td>
-   <td class="${x.needs_action?'risk-critical':'risk-low'}">${esc(x.status||'-')}</td>
-   <td>${esc(x.group||'')}</td><td>${esc(x.owner||'')}</td>
-   <td><button class="ghost" onclick="delAsset('${esc(x.url)}')">删除</button></td></tr>`).join('')
-   ||'<tr><td colspan=7 class=tagline>暂无资产</td></tr>';
-}
-async function addAsset(){
-  const u=$('#a-url').value.trim();if(!u)return;
-  await api('/api/assets',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({url:u,group:$('#a-group').value,owner:$('#a-owner').value})});
-  $('#a-url').value='';loadAssets();}
-async function delAsset(url){await api('/api/assets?url='+encodeURIComponent(url),{method:'DELETE'});loadAssets();}
-async function scanUrl(){
-  const u=$('#s-url').value.trim();if(!u)return;
-  $('#scan-out').textContent='扫描中...';
-  const r=await api('/api/scan/url',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({url:u,do_probe:$('#s-probe').checked})});
-  $('#scan-out').textContent=JSON.stringify(r,null,2);}
-async function scanLogs(){
-  const p=$('#s-log').value.trim();if(!p)return;
-  $('#scan-out').textContent='分析中...';
-  try{const r=await api('/api/scan/logs',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({path:p})});$('#scan-out').textContent=JSON.stringify(r,null,2);}
-  catch(e){$('#scan-out').textContent='错误: '+e.message}}
-async function hostCheck(){
-  $('#host-out').textContent='检测中...';
-  const r=await api('/api/scan/host',{method:'POST'});
-  $('#host-out').textContent=JSON.stringify(r,null,2);}
-async function loadRules(){
-  const r=await api('/api/rules');
-  $('#t-rules tbody').innerHTML=r.rules.map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.name)}</td>
-   <td class="sev-${esc(x.severity)}">${esc(x.severity)}</td><td>${esc(x.dimension)}</td>
-   <td><code>${esc(x.requires)}</code></td><td>${esc((x.cves||[]).join(', '))}</td></tr>`).join('');
-  const i=await api('/api/ioc');$('#ioc-out').textContent=JSON.stringify(i,null,2);}
-setInterval(()=>{$('#clock').textContent=new Date().toLocaleString('zh-CN')},1000);
-loadDash();
-</script></body></html>"""
-
-
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> str:
-    return _DASH
+    return DASHBOARD_HTML
