@@ -90,9 +90,16 @@ def _asset_from_profile(prof: discovery.DeviceProfile, group: str, owner: str, n
         "alive": prof.alive,
         "device_type": prof.device_type,
         "device_label": prof.device_label,
+        "product": prof.product,
         "vendor": prof.vendor,
         "os_hint": prof.os_hint,
+        "tech_stack": prof.tech_stack,
+        "mac": prof.mac,
+        "mac_vendor": prof.mac_vendor,
         "open_ports": prof.open_ports,
+        "meaningful_ports": prof.meaningful_ports,
+        "noise_ports": prof.noise_ports,
+        "candidates": prof.candidates,
         "services": [s.to_dict() for s in prof.services],
         "php_present": prof.php_present,
         "php_version": prof.php_version,
@@ -634,6 +641,10 @@ def _run_discover(job, params: dict) -> dict:
             assets = _load_assets()
             by_host = {a["host"]: a for a in assets}
             for rec in results:
+                # 离线 / 无有效协议响应的主机不写入台账，也不显示
+                if not rec.get("alive"):
+                    by_host.pop(rec["host"], None)
+                    continue
                 old = by_host.get(rec["host"])
                 if old:
                     rec.update({
@@ -643,11 +654,20 @@ def _run_discover(job, params: dict) -> dict:
                     })
                 by_host[rec["host"]] = rec
             _save_assets(list(by_host.values()))
+    online = [r for r in results if r.get("alive")]
+    offline = len(results) - len(online)
     res = _new_scan("discover")
     res.target_count = len(results)
-    res.assets = results
+    res.assets = online
+    res.errors.append(f"扫描 {len(results)} 个目标，{len(online)} 个在线，{offline} 个无有效响应（已排除）")
     _persist(res)
-    return {"scan_id": res.scan_id, "count": len(results), "assets": results}
+    return {
+        "scan_id": res.scan_id,
+        "count": len(online),
+        "total": len(results),
+        "offline": offline,
+        "assets": online,
+    }
 
 
 def _run_logs(job, params: dict) -> dict:

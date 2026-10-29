@@ -578,10 +578,13 @@ async function refreshDiscoverResults(){
   const latest=S.jobs.find(j=>j.kind==='discover'&&j.state==='done'&&j.result&&j.result.assets);
   const label=running?`扫描进行中（${running} 个任务）`:
     (latest?`最近一次扫描结果 · ${latest.id}`:'台账中的设备');
+  const off = latest && latest.result && latest.result.offline !== undefined ? latest.result.offline : null;
   box.innerHTML=`<div style="grid-column:1/-1;display:flex;align-items:center;gap:9px;margin-bottom:2px">
       <span style="font-size:12.5px;font-weight:600">${esc(label)}</span>
-      <span class="muted" style="font-size:11.5px">共 ${S.assets.length} 台</span></div>`+
-    (latest?`<div style="grid-column:1/-1" class="hint">下方为本次扫描识别到的设备；台账完整列表见「资产台账」。</div>`:'');
+      <span class="muted" style="font-size:11.5px">在线 ${S.assets.length} 台</span>
+      ${off!==null?`<span class="muted" style="font-size:11.5px">· 已排除 ${off} 台无有效响应（离线 / NAT 拦截）</span>`:''}
+      </div>`+
+    (latest?`<div style="grid-column:1/-1" class="hint">下方为本次扫描识别到的在线设备；端口可连但无协议响应的目标（出口 NAT / tarpit）已自动排除。台账完整列表见「资产台账」。</div>`:'');
   renderDevices(box,S.assets);
 }
 
@@ -634,10 +637,12 @@ function renderDevices(box,assets){
         ${tag(exp[0],exp[1])}
       </div>
       <div class="dev-meta">
-        ${a.vendor?tag('info',a.vendor):''}
+        ${a.product?tag('info',a.product):''}
+        ${a.vendor?tag('pur',a.vendor):''}
         ${a.os_hint?tag('mute',a.os_hint):''}
+        ${(a.tech_stack||[]).map(x=>tag('crit',x)).join('')}
         ${a.php_version?tag('crit','PHP '+esc(a.php_version)):a.php_present?tag('warn','PHP 版本未知'):''}
-        ${a.sapi?tag('mute',SAPI_RISK[a.sapi]||a.sapi):''}
+        ${a.mac_vendor?tag('mute',a.mac_vendor):''}
       </div>
       <div class="ports" style="margin-top:8px">
         ${(a.open_ports||[]).slice(0,20).map(p=>`<span class="port ${phpPorts.includes(p)?'php':(/^(80|443|8080|8443|2000|8888|10000)$/.test(p)?'web':'')}">${p}</span>`).join('')}
@@ -725,8 +730,8 @@ async function loadAssets(c){
       <input id="a-search" placeholder="搜索 IP / 厂商 / 设备类型" style="max-width:230px">
     </div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>主机</th><th>设备类型</th><th>厂商</th><th>PHP</th><th>SAPI</th><th>暴露面</th><th>风险</th>
-        <th>分组</th><th>负责人</th><th></th></tr></thead>
+      <thead><tr><th>主机</th><th>设备类型</th><th>产品</th><th>厂商</th><th>技术栈</th><th>PHP</th>
+        <th>暴露面</th><th>置信度</th><th>分组</th><th>负责人</th><th></th></tr></thead>
       <tbody id="a-body"></tbody>
     </table></div>
   </div>`;
@@ -771,17 +776,18 @@ async function loadAssets(c){
     $('#a-body').innerHTML=rows.map(x=>`<tr>
       <td class="mono h">${esc(x.host)}</td>
       <td>${ico(DEV_ICON[x.device_type]||'box','s12')} ${esc(x.device_label||'-')}</td>
-      <td>${x.vendor?esc(x.vendor):'<span class="muted">-</span>'}</td>
+      <td style="font-size:11.5px">${esc(x.product||'-')}</td>
+      <td style="font-size:11.5px">${x.vendor?esc(x.vendor):'<span class="muted">-</span>'}</td>
+      <td>${(x.tech_stack||[]).map(s=>tag('crit',s)).join(' ')||'<span class="muted">-</span>'}</td>
       <td class="num">${x.php_version?'<b>'+esc(x.php_version)+'</b>':(x.php_present?tag('warn','未知'):'<span class="muted">无</span>')}</td>
-      <td style="font-size:11.5px">${x.sapi?esc(SAPI_RISK[x.sapi]||x.sapi):'<span class="muted">-</span>'}</td>
       <td>${tag((EXP[x.exposure]||['mute','?'])[0],(EXP[x.exposure]||['mute','?'])[1])}</td>
-      <td>${tag((RISK[x.risk]||['mute','?'])[0],(RISK[x.risk]||['mute','?'])[1])}</td>
+      <td class="num muted" style="font-size:11.5px">${((x.confidence||0)*100).toFixed(0)}%</td>
       <td><span class="editable" contenteditable="true" data-k="group" data-h="${esc(x.host)}">${esc(x.group||'')}</span></td>
       <td><span class="editable" contenteditable="true" data-k="owner" data-h="${esc(x.host)}">${esc(x.owner||'')}</span></td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn sm" onclick="event.stopPropagation();openAsset('${esc(x.host)}')">详情</button>
         <button class="btn sm ghost" onclick="event.stopPropagation();rescan('${esc(x.host)}')">复扫</button></td></tr>`).join('')
-      ||'<tr><td colspan="10"><div class="empty">'+ico('list')+'<b>没有匹配的资产</b></div></td></tr>';
+      ||'<tr><td colspan="11"><div class="empty">'+ico('list')+'<b>没有匹配的资产</b></div></td></tr>';
     $$('#a-body .editable').forEach(el=>{
       el.onblur=async()=>{
         const host=el.dataset.h,k=el.dataset.k,v=el.textContent.trim();
@@ -813,7 +819,12 @@ async function openAsset(host){
         ${x.vendor?tag('info',x.vendor):''} ${x.os_hint?tag('mute',x.os_hint):''}</div>
       <dl class="kv">
         <dt>设备类型</dt><dd>${ico(DEV_ICON[x.device_type]||'box','s12')} ${esc(x.device_label||'-')}</dd>
+        <dt>具体产品</dt><dd>${esc(x.product||'-')}</dd>
+        <dt>技术栈</dt><dd>${(x.tech_stack||[]).map(s=>tag('crit',s)).join(' ')||'<span class="muted">-</span>'}</dd>
         <dt>置信度</dt><dd class="num">${((x.confidence||0)*100).toFixed(0)}%</dd>
+        <dt>MAC 厂商</dt><dd>${esc(x.mac_vendor||'-')} ${x.mac?`<span class="mono muted" style="font-size:11px">${esc(x.mac)}</span>`:''}</dd>
+        <dt>有效端口</dt><dd class="num">${(x.meaningful_ports||[]).join(', ')||'-'}</dd>
+        <dt>噪声端口</dt><dd class="num muted">${(x.noise_ports||[]).join(', ')||'-'}</dd>
         <dt>PHP</dt><dd>${x.php_version?'<b>PHP '+esc(x.php_version)+'</b>':(x.php_present?'存在但版本未知':'未检测到')}</dd>
         <dt>SAPI</dt><dd>${x.sapi?esc(SAPI_RISK[x.sapi]||x.sapi):'-'}</dd>
         <dt>开放端口</dt><dd><div class="ports">${(x.open_ports||[]).map(p=>`<span class="port">${p}</span>`).join('')||'-'}</div></dd>
@@ -829,6 +840,8 @@ async function openAsset(host){
       <tbody>${svc.map(s=>`<tr><td class="num">${s.port}</td><td style="font-size:11.5px">${esc(s.proto||'-')}</td>
         <td class="num">${s.http_status||'-'}</td><td style="font-size:11.5px">${esc(s.server||'-')}</td>
         <td style="font-size:11.5px">${esc(s.http_title||s.tls_subject||s.banner||'-')}</td></tr>`).join('')}</tbody></table></div></div>`:''}
+    ${(x.candidates||[]).length?`<div class="sect"><div class="sect-t">其他候选</div>
+      <div class="row">${(x.candidates||[]).map(c=>tag('mute',c.label+' ('+c.score+')')).join('')}</div></div>`:''}
     <div class="sect"><div class="sect-t">判定证据（${(x.evidence||[]).length}）</div>
       ${(x.evidence||[]).map(e=>`<div class="evi">${esc(e)}</div>`).join('')||'<div class="muted" style="font-size:12px">无</div>'}</div>
     ${(x.errors||[]).length?`<div class="sect"><div class="sect-t">错误</div>
@@ -865,7 +878,7 @@ async function loadPhp(c){
     <div class="kpi"><div class="k">${ico('alert','s12')}暴露</div><div class="v num danger">${r.rows.filter(x=>x.exposure==='exposed').length}</div><div class="d">版本低于基线</div></div>
     <div class="kpi"><div class="k">${ico('check','s12')}已修复</div><div class="v num ok">${r.rows.filter(x=>x.exposure==='patched').length}</div><div class="d">已达基线</div></div>
     <div class="kpi"><div class="k">${ico('alert','s12')}待确认</div><div class="v num warn">${r.rows.filter(x=>x.exposure==='unknown').length}</div><div class="d">有 PHP 迹象无版本</div></div>
-    <div class="kpi"><div class="k">${ico('code','s12')}PHP 资产</div><div class="v num">${r.rows.length}</div><div class="d">总��</div></div>
+    <div class="kpi"><div class="k">${ico('code','s12')}PHP 资产</div><div class="v num">${r.rows.length}</div><div class="d">总量</div></div>
   </div>
   <div class="card">
     <div class="card-h"><h3>受影响资产明细</h3><div class="sp"></div>
