@@ -1,47 +1,25 @@
-"""HTTP 指纹与 SAPI 识别。
+"""HTTP 指纹 —— 兼容层。
 
-SAPI（Server API）决定同一 PHP 版本的实际风险与可用的检测手段：
-  - mod_php   : 风险最高，未认证请求可在应用代码运行前触发利用
-  - PHP-FPM   : 启动失败会退出子进程，部分链路被阻断
-  - php-cgi   : 受影响
-  - FrankenPHP: 与 mod_php 行为同构，源码分析表明很可能易受影响
-  - LiteSpeed : 建模类似 FPM
+真正的探测实现在 `core/discovery.py`，与设备发现共用同一套
+HTTP 探测、路径/UA 回退阶梯与 SAPI 判定逻辑。
+
+历史上这里有一份独立实现，导致 **CLI 与 Web 控制台用两套引擎**：
+CLI 看不到设备类型、不做存活判定，Web 能看到。结果不一致。
+现在统一到 discovery，本模块只保留旧接口供 URL 探测与外部调用使用。
 """
 from __future__ import annotations
 
-import re
 from dataclasses import asdict, dataclass, field
 from typing import Optional
+from urllib.parse import urlparse
 
-import httpx
-
-#: SAPI 签名特征：按判定优先级排列（越靠前越具体）
-SAPI_SIGNATURES: list[tuple[str, tuple[str, ...], str]] = [
-    ("openresty", ("openresty",), "OpenResty / Nginx + PHP-FPM"),
-    ("frankenphp", ("frankenphp", "caddy"), "FrankenPHP"),
-    ("litespeed", ("litespeed", "openlitespeed"), "LiteSpeed / OpenLiteSpeed"),
-    ("iis-cgi", ("microsoft-iis", "iis"), "Microsoft IIS + php-cgi"),
-    ("apache-fpm", ("apache/", "apache "), "Apache + mod_proxy_fcgi (PHP-FPM)"),
-    ("nginx", ("nginx",), "Nginx + PHP-FPM"),
-    ("apache", ("apache",), "Apache + mod_php"),
-    ("iis", ("microsoft-iis",), "Microsoft IIS"),
-]
-
-#: 响应体 / 错误页中的 SAPI 指纹
-_BODY_SIGNATURES: list[tuple[str, str]] = [
-    (r"Primary script unknown", "fpm"),
-    (r"No input file specified\.", "cgi"),
-    (r"Apache/\d[\d.]*\s+Server at", "apache"),
-    (r"Failed loading .*\.so", "apache"),
-    (r"phpinfo\(\)", "any"),
-]
-
-_PHP_IN_BODY_RE = re.compile(r"PHP/(\d+\.\d+\.\d+)")
+from .discovery import _detect_sapi as detect_sapi
+from .discovery import probe_http
 
 
 @dataclass
 class Fingerprint:
-    """一次 HTTP 指纹采集的结果。"""
+    """一次 HTTP 指纹采集的结果（兼容旧接口）。"""
 
     url: str
     ok: bool = False
@@ -60,91 +38,61 @@ class Fingerprint:
         return asdict(self)
 
 
-def _detect_sapi(server: str | None, powered_by: str | None, body: str) -> tuple[Optional[str], Optional[str], list[str]]:
-    signals: list[str] = []
-    blob = f"{server or ''} {powered_by or ''}".lower()
-    for key, needles, label in SAPI_SIGNATURES:
-        if any(n in blob for n in needles):
-            signals.append(f"header:{key}")
-            sapi, sapi_label = key, label
-            break
-    else:
-        sapi, sapi_label = None, None
-
-    for pattern, hint in _BODY_SIGNATURES:
-        if re.search(pattern, body, re.IGNORECASE):
-            signals.append(f"body:{hint}")
-            if sapi is None:
-                sapi = hint
-                sapi_label = {
-                    "fpm": "PHP-FPM",
-                    "cgi": "php-cgi",
-                    "apache": "Apache + mod_php",
-                }.get(hint, "未知")
-
-    # mod_php 判定增强：Apache Server 头 + PHP X-Powered-By 同时出现
-    if server and "apache" in server.lower() and powered_by and "php/" in powered_by.lower():
-        if sapi in (None, "apache", "apache-fpm"):
-            signals.append("combo:apache+php")
-            sapi = "apache"
-            sapi_label = "Apache + mod_php"
-
-    return sapi, sapi_label, signals
+_SAPI_LABEL = {
+    "apache": "Apache + mod_php",
+    "fpm": "PHP-FPM",
+    "iis": "Microsoft IIS + php-cgi",
+    "litespeed": "LiteSpeed",
+    "unknown": "未知 SAPI",
+}
 
 
-def extract_php_version(server: str | None, powered_by: str | None, body: str = "") -> Optional[str]:
-    """从响应头与响应体中提取 PHP 版本号。"""
-    for candidate in (powered_by, server):
-        if candidate:
-            m = re.search(r"PHP/(\d+\.\d+\.\d+)", candidate)
-            if m:
-                return m.group(1)
-    if body:
-        m = _PHP_IN_BODY_RE.search(body)
-        if m:
-            return m.group(1)
-    return None
-
-
-def fingerprint(url: str, *, timeout: float = 10.0, verify_tls: bool = True, method: str = "GET") -> Fingerprint:
-    """采集单个 URL 的版本与 SAPI 指纹。只读操作，不发送任何利用载荷。"""
+def fingerprint(url: str, *, timeout: float = 10.0, verify_tls: bool = True,
+                method: str = "GET") -> Fingerprint:
+    """采集单个 URL 的版本与 SAPI 指纹（只读）。"""
     fp = Fingerprint(url=url)
-    try:
-        with httpx.Client(follow_redirects=False, timeout=timeout, verify=verify_tls) as client:
-            resp = client.request(method, url, headers={"User-Agent": "p2s-fingerprint/0.1"})
-        fp.ok = True
-        fp.status_code = resp.status_code
-        fp.server = resp.headers.get("Server")
-        fp.x_powered_by = resp.headers.get("X-Powered-By")
-        body = ""
-        if resp.headers.get("content-type", "").lower().startswith("text/"):
-            body = resp.text[:20000]
-        fp.php_version = extract_php_version(fp.server, fp.x_powered_by, body)
-        sapi, label, signals = _detect_sapi(fp.server, fp.x_powered_by, body)
-        fp.sapi, fp.sapi_label, fp.signals = sapi, label, signals
-        fp.confidence = 0.9 if fp.php_version else 0.3
-        if fp.php_version and fp.sapi:
-            fp.confidence = 0.95
-        elif fp.php_version:
-            fp.confidence = 0.8
-    except Exception as exc:  # noqa: BLE001 - 采集类工具需要吞掉一切网络异常
-        fp.error = f"{type(exc).__name__}: {exc}"
+    parsed = urlparse(url if "://" in url else f"http://{url}")
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    https = parsed.scheme == "https"
+    if not host:
+        fp.error = "无法解析主机名"
+        return fp
+
+    svc = probe_http(host, port, https=https, timeout=timeout, quick=True)
+    if svc is None:
+        fp.error = "探测失败"
+        return fp
+    if svc.http_status is None:
+        fp.error = svc.banner or "无 HTTP 响应"
+        return fp
+
+    fp.ok = True
+    fp.status_code = svc.http_status
+    fp.server = svc.server
+    fp.x_powered_by = svc.x_powered_by
+    fp.php_version = svc.php_hint if (svc.php_hint or "").lower().startswith("php/") else None
+    if fp.php_version and "/" in fp.php_version:
+        fp.php_version = fp.php_version.split("/", 1)[1]
+    sapi = detect_sapi(svc.server, svc.x_powered_by, port)
+    fp.sapi = sapi
+    fp.sapi_label = _SAPI_LABEL.get(sapi or "unknown")
+    fp.confidence = 0.9 if fp.php_version else 0.5
+    fp.signals = [f"status:{fp.status_code}"]
+    if svc.server:
+        fp.signals.append(f"server:{svc.server}")
+    if svc.http_title:
+        fp.signals.append(f"title:{svc.http_title[:60]}")
     return fp
 
 
-#: 常见探测路径（只读）
-DEFAULT_PATHS: tuple[str, ...] = ("/index.php", "/", "/phpinfo.php", "/info.php")
-
-
-def fingerprint_paths(
-    base_url: str, paths: tuple[str, ...] = DEFAULT_PATHS, *, timeout: float = 10.0
-) -> list[Fingerprint]:
+def fingerprint_paths(base_url: str, paths=("/index.php", "/", "/info.php", "/phpinfo.php"),
+                       *, timeout: float = 10.0) -> list[Fingerprint]:
     """对一组路径做指纹采集，返回去重后的结果。"""
     out: list[Fingerprint] = []
     seen: set[str] = set()
-    for p in paths:
-        url = base_url.rstrip("/") + p
-        fp = fingerprint(url, timeout=timeout)
+    for path in paths:
+        fp = fingerprint(base_url.rstrip("/") + path, timeout=timeout)
         key = f"{fp.php_version}|{fp.sapi}"
         if key in seen and fp.ok:
             continue

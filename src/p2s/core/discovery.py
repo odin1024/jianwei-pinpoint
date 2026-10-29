@@ -291,10 +291,13 @@ def probe_http(host: str, port: int, *, https: bool = False, timeout: float = 8.
     elif "powered by php" in body.lower():
         svc.php_hint = "Powered by PHP"
 
-    # favicon 哈希（深度模式）
+    # favicon 哈希（深度模式）。
+    # 注意：上面的 client 已经随 with 块关闭，这里必须另开一个连接，
+    # 否则每次都会抛 "client has been closed" 被静默吞掉 —— favicon 永远拿不到。
     if favicon:
         try:
-            fr = client.get(f"{base}/favicon.ico", headers={"User-Agent": UA_LADDER[0]})
+            with httpx.Client(verify=False, timeout=min(timeout, 5.0), follow_redirects=False) as fc:
+                fr = fc.get(f"{base}/favicon.ico", headers={"User-Agent": UA_LADDER[0]})
             if fr.status_code == 200 and fr.content:
                 svc.favicon_sha256 = hashlib.sha256(fr.content).hexdigest()
         except Exception:

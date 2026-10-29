@@ -22,8 +22,8 @@ from .core import discovery, hostcheck, logscan
 from .core import ioc as ioc_mod
 from .core import probe as probe_mod
 from .core import report as report_mod
+from .core.oui import read_arp_table
 from .core.rules import RULES
-from .core.versions import classify
 
 
 def _now() -> str:
@@ -55,10 +55,19 @@ def _emit(result: report_mod.ScanResult, outdir: str | None, quiet: bool) -> Non
         if counts:
             print("  命中分布: " + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
         for a in result.assets:
-            v = a.get("version_verdict", {})
-            fp = a.get("fingerprint", {})
-            print(f"  [{a.get('risk','-'):8}] {a.get('url')}  PHP={v.get('version','?')} "
-                  f"SAPI={fp.get('sapi_label','?')}  版本={v.get('status','?')} 探测={a.get('probe_verdict','?')}")
+            if a.get("alive") is False:
+                print(f"  [离线    ] {a.get('host')}  无有效协议响应（不计入台账）")
+                continue
+            if a.get("host"):
+                print(f"  [{a.get('risk','-'):8}] {a.get('host')}  {a.get('device_label')}  "
+                      f"产品={a.get('product') or '-'}  "
+                      f"PHP={a.get('php_version') or ('无' if a.get('exposure') == 'not_php' else '?')}  "
+                      f"暴露={a.get('exposure')} 置信={a.get('confidence')}")
+            else:
+                v = a.get("version_verdict", {})
+                fpx = a.get("fingerprint", {})
+                print(f"  [{a.get('risk','-'):8}] {a.get('url')}  PHP={v.get('version','?')} "
+                      f"SAPI={fpx.get('sapi_label','?')}  版本={v.get('status','?')} 探测={a.get('probe_verdict','?')}")
         for f in result.findings[:20]:
             print(f"  ! [{f.get('severity')}] {f.get('rule_id')} {f.get('rule_name')} :: {str(f.get('evidence'))[:110]}")
         if len(result.findings) > 20:
@@ -138,18 +147,20 @@ def _expand_cidr(cidr: str) -> list[str]:
 
 
 def cmd_assets(args: argparse.Namespace) -> int:
-    hosts = _read_hosts(args.file, args.url)
+    hosts = _read_hosts(args.file, args.host or args.url)
     res = report_mod.ScanResult(scan_id=f"assets-{uuid.uuid4().hex[:10]}", kind="assets", started_at=_now())
     res.target_count = len(hosts)
+    arp = read_arp_table()
     for h in hosts:
-        url = h if h.startswith("http") else f"http://{h}"
-        fp = probe_mod.fingerprint(url, timeout=args.timeout)
-        vv = classify(fp.php_version)
-        asm = probe_mod.Assessment(url=url, fingerprint=fp, version_verdict=vv)
-        asm.probe_verdict = "skipped"
-        asm.confidence = 0.9 if fp.php_version else 0.3
-        asm.remediation = probe_mod._remediation(vv)
-        res.assets.append(asm.to_dict())
+        host_only = h.split("://")[-1].split("/")[0].split(":")[0]
+        # 与 Web 控制台共用同一引擎：同样的存活判定、同样的设备分类
+        prof = discovery.discover(
+            host_only, timeout=args.timeout, http_timeout=max(args.timeout * 3, 6.0),
+            deep=not args.quick, arp=arp,
+        )
+        res.assets.append(prof.to_dict())
+        for e in prof.errors:
+            res.errors.append(f"{host_only}: {e}")
     _emit(res, args.report, args.quiet)
     return 0
 
@@ -298,10 +309,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_report(sp)
     sp.set_defaults(func=cmd_discover)
 
-    sp = sub.add_parser("assets", help="资产测绘：版本识别 + 修复状态判定")
+    sp = sub.add_parser("assets", help="资产测绘：设备识别 + PHP 版本 + 修复状态")
     sp.add_argument("--file", help="主机/URL 列表文件")
-    sp.add_argument("--url", action="append", help="单个 URL（可重复）")
-    sp.add_argument("--timeout", type=float, default=10.0)
+    sp.add_argument("--host", action="append", help="单个主机 IP（可重复）")
+    sp.add_argument("--url", action="append", help="单个 URL（可重复，兼容）")
+    sp.add_argument("--quick", action="store_true", help="快速模式：只探测常见端口")
+    sp.add_argument("--timeout", type=float, default=1.2, help="TCP 超时(秒)")
     add_report(sp)
     sp.set_defaults(func=cmd_assets)
 

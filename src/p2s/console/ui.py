@@ -14,13 +14,16 @@ DASHBOARD_HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>p2s · php2shell 暴露面评估</title>
+<title>见微 Pinpoint · PHP 暴露面评估</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI3IiBmaWxsPSIjMWQ0ZWQ4Ii8+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwwKSIgY29sb3I9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMi4xIj48cGF0aCBkPSJNNCAxMS41VjYuNUEyLjUgMi41IDAgMCAxIDYuNSA0aDUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjIuMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHBhdGggZD0iTTI4IDExLjVWNi41QTIuNSAyLjUgMCAwIDAgMjUuNSA0aC01IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxwYXRoIGQ9Ik00IDIwLjV2NUEyLjUgMi41IDAgMCAwIDYuNSAyOGg1IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxwYXRoIGQ9Ik0yOCAyMC41djVBMi41IDIuNSAwIDAgMSAyNS41IDI4aC01IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjMuNiIgZmlsbD0iY3VycmVudENvbG9yIi8+PC9nPjwvc3ZnPg==">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="见微 Pinpoint —— 企业内网 PHP 暴露面发现与合规评估工具">
 <style>
 :root{
   --bg:#f2f3f5; --surface:#fff; --surface-2:#f7f8fa; --surface-3:#edeff2;
   --border:#dfe3e8; --border-2:#c9cfd6; --border-3:#aeb6c0;
   --text:#14181f; --text-2:#545c68; --text-3:#8a929e;
-  --accent:#1f5fd0; --accent-hover:#1a52b5; --accent-soft:#eef3fc; --accent-border:#c3d5f3;
+  --accent:#1d4ed8; --accent-hover:#1a44bd; --accent-soft:#eef3fc; --accent-border:#c4d6f8;
   --danger:#b42318; --danger-soft:#fdf1f0; --danger-border:#f3c9c4;
   --warn:#b54708; --warn-soft:#fdf6ec; --warn-border:#f0d5b0;
   --ok:#067647; --ok-soft:#edf8f1; --ok-border:#b9e0c8;
@@ -61,8 +64,8 @@ svg.i.s18{width:18px;height:18px;flex:0 0 18px}
   background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column}
 .brand{height:var(--topbar);padding:0 16px;border-bottom:1px solid var(--border);
   display:flex;align-items:center;gap:9px}
-.brand-mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);color:#fff;
-  display:grid;place-items:center;font-size:10.5px;font-weight:700;letter-spacing:.3px;flex:0 0 26px}
+.brand-mark{width:30px;height:30px;border-radius:8px;background:var(--accent);color:#fff;
+  display:grid;place-items:center;flex:0 0 30px;line-height:0}
 .brand-txt b{display:block;font-size:13px;font-weight:650;line-height:1.25}
 .brand-txt span{display:block;font-size:10px;color:var(--text-3);letter-spacing:.4px}
 .nav{padding:10px 8px;flex:1;overflow-y:auto}
@@ -76,9 +79,13 @@ svg.i.s18{width:18px;height:18px;flex:0 0 18px}
 .nav a.on .cnt{background:var(--accent);color:#fff}
 .nav a .cnt.run{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn-border)}
 .side-foot{padding:10px;border-top:1px solid var(--border)}
-.note-box{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);
-  padding:8px 10px;font-size:11px;color:var(--text-2);line-height:1.55}
-.note-box b{display:block;color:var(--text);font-size:11.5px;margin-bottom:2px}
+.side-stat{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:9px 10px}
+.side-stat-t{font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.5px;text-transform:uppercase}
+.side-stat-n{margin-top:6px;font-size:11.5px;color:var(--text-2);line-height:1.7}
+.side-stat-n b{font-variant-numeric:tabular-nums;font-weight:650;color:var(--text)}
+.side-stat-n .r{color:var(--danger);font-weight:650}
+.side-stat-n .o{color:var(--warn);font-weight:650}
+.side-stat-n .g{color:var(--ok);font-weight:650}
 
 .main{flex:1;margin-left:var(--sidebar);min-width:0;display:flex;flex-direction:column}
 .topbar{height:var(--topbar);position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;
@@ -173,7 +180,63 @@ textarea{resize:vertical;min-height:76px;font-family:var(--mono);font-size:11.5p
   font-family:var(--mono);line-height:1.55;word-break:break-all}
 .fixbox{background:var(--ok-soft);border:1px solid var(--ok-border);border-radius:var(--r);padding:10px 12px;font-size:12px}
 .fixbox.warn{background:var(--warn-soft);border-color:var(--warn-border)}
-.fixbox ul{margin:5px 0 0 15px;padding:0} .fixbox li{margin-bottom:2px}/* ---- 设备卡片 ---- */
+.fixbox ul{margin:5px 0 0 15px;padding:0} .fixbox li{margin-bottom:2px}
+/* ---- 关键指标强调：0 值时收敛为中性，非 0 时升级为视觉重心 ---- */
+.kpi.primary{border-color:var(--danger-border);background:linear-gradient(180deg,var(--danger-soft),var(--surface) 52%)}
+.kpi.primary .v{color:var(--danger)}
+.kpi.quiet .v{color:var(--text-3)}
+.kpi.quiet .k{color:var(--text-3)}
+
+/* ---- 提醒条（替代原先挤在侧边栏底部的静态信息块）---- */
+.alert{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-radius:var(--r-lg);
+  border:1px solid var(--danger-border);background:var(--danger-soft);margin-bottom:14px;font-size:12.5px;line-height:1.6}
+.alert.ok{border-color:var(--ok-border);background:var(--ok-soft)}
+.alert.warn{border-color:var(--warn-border);background:var(--warn-soft)}
+.alert .ic{flex:0 0 16px;margin-top:1px;color:var(--danger)}
+.alert.ok .ic{color:var(--ok)} .alert.warn .ic{color:var(--warn)}
+.alert b{display:block;margin-bottom:1px}
+.alert .body{flex:1;min-width:0}
+.alert .act{margin-left:auto;flex:0 0 auto;display:flex;gap:6px;align-items:center}
+
+/* ---- 侧栏折叠 / 移动端 ---- */
+.sidebar{transition:width .18s ease,transform .18s ease}
+.sidebar.mini{width:56px;flex-basis:56px}
+.sidebar.mini .brand-txt,.sidebar.mini .nav a .lbl,.sidebar.mini .nav-label,.sidebar.mini .side-foot{display:none}
+.sidebar.mini .nav a{justify-content:center;padding:9px 0}
+.sidebar.mini .nav a .cnt{display:none}
+.sidebar.mini .brand{justify-content:center;padding:0 9px}
+.main{transition:margin-left .18s ease}
+.mobile-btn{display:none}
+@media(max-width:900px){
+  .sidebar{transform:translateX(-100%);box-shadow:var(--sh-3)}
+  .sidebar.open{transform:none}
+  .main{margin-left:0}
+  .content{padding:16px}
+  .topbar{padding:0 14px}
+  .mobile-btn{display:grid}
+  .kpis{grid-template-columns:repeat(auto-fit,minmax(142px,1fr))}
+  .grid[style*="1fr 1fr"]{grid-template-columns:1fr!important}
+  .dev-grid{grid-template-columns:1fr}
+  .page-head{flex-wrap:wrap}
+}
+@media(max-width:560px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .topbar .sub{display:none}
+}
+
+/* ---- 表头排序 ---- */
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--text)}
+th.sortable::after{content:"\2195";opacity:.28;margin-left:5px;font-size:10px}
+th.sortable.asc::after{content:"\2191";opacity:.95}
+th.sortable.desc::after{content:"\2193";opacity:.95}
+
+/* ---- 批量操作条 ---- */
+.bulk{display:flex;align-items:center;gap:9px;padding:8px 14px;background:var(--accent-soft);
+  border-bottom:1px solid var(--accent-border);font-size:12.5px;flex-wrap:wrap}
+.bulk .n{color:var(--text-2)}
+input[type=checkbox]{width:auto;accent-color:var(--accent)}
+/* ---- 设备卡片 ---- */
 .dev-grid{grid-template-columns:repeat(auto-fill,minmax(310px,1fr))}
 .dev{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px 13px;
   cursor:pointer;transition:.14s}
@@ -296,8 +359,8 @@ textarea{resize:vertical;min-height:76px;font-family:var(--mono);font-size:11.5p
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark">P2S</div>
-      <div class="brand-txt"><b>php2shell</b><span>暴露面评估</span></div>
+      <div class="brand-mark"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="21" height="21" stroke-width="2.5"><path d="M4 11.5V6.5A2.5 2.5 0 0 1 6.5 4h5" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M28 11.5V6.5A2.5 2.5 0 0 0 25.5 4h-5" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 20.5v5A2.5 2.5 0 0 0 6.5 28h5" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M28 20.5v5A2.5 2.5 0 0 1 25.5 28h-5" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="16" r="3.6" fill="currentColor"/></svg></div>
+      <div class="brand-txt"><b>见微 Pinpoint</b><span>PHP 暴露面评估</span></div>
     </div>
     <nav class="nav">
       <div class="nav-group">总览</div>
@@ -315,9 +378,9 @@ textarea{resize:vertical;min-height:76px;font-family:var(--mono);font-size:11.5p
       <a href="#reports" data-tab="reports"><svg class="i"><use href="#i-file"/></svg>报告中心</a>
     </nav>
     <div class="side-foot">
-      <div class="note-box">
-        <b>CISA KEV 已收录</b>
-        CVE-2026-109618 / 109619 存在在野利用，强制修复截止 2026-10-29。
+      <div class="side-stat" id="side-stat">
+        <div class="side-stat-t">暴露面摘要</div>
+        <div class="side-stat-n" id="side-stat-body">加载中…</div>
       </div>
     </div>
   </aside>
@@ -330,6 +393,7 @@ textarea{resize:vertical;min-height:76px;font-family:var(--mono);font-size:11.5p
       </div>
       <div class="sp"></div>
       <div class="row" style="flex:0 0 auto">
+        <button class="icon-btn mobile-btn" id="btn-menu" title="菜单">☰</button>
         <button class="icon-btn" id="btn-theme" title="切换深浅色"><svg class="i"><use href="#i-moon"/></svg></button>
         <button class="btn" id="btn-refresh"><svg class="i s12"><use href="#i-refresh"/></svg>刷新</button>
       </div>
@@ -369,6 +433,7 @@ const DEV_ICON={firewall:'shield',bastion:'terminal',network_device:'net',mail_g
   cms:'file',db_tool:'db',monitoring:'grid',devops:'layers',file_service:'box',cloud:'cloud',
   container:'boxx',iot_device:'target',appliance:'box',unknown:'box'};
 const SAPI_RISK={apache:'mod_php（风险最高）',fpm:'PHP-FPM',iis:'php-cgi',litespeed:'LiteSpeed',unknown:'未知 SAPI'};
+const KIND={discover:'设备发现',logs:'日志分析',host:'主机侧检测',url:'URL 探测',agent:'Agent 上报'};
 const JOB_STYLE={queued:'',running:'run',done:'ok',failed:'err',cancelled:'warn'};
 
 /* ==================== 主题 ==================== */
@@ -404,6 +469,12 @@ async function go(tab){
 }
 $$('.nav a').forEach(a=>a.onclick=e=>{e.preventDefault();location.hash=a.dataset.tab});
 $('#btn-refresh').onclick=()=>go(location.hash.slice(1)||'overview');
+$('#btn-menu').onclick=()=>$('.sidebar').classList.toggle('open');
+$$('.nav a').forEach(a=>a.addEventListener('click',()=>$('.sidebar').classList.remove('open')));
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'){e.preventDefault();$('.sidebar').classList.toggle('mini')}
+  if(e.key==='Escape')closeDrawer();
+});
 window.addEventListener('hashchange',()=>go(location.hash.slice(1)||'overview'));
 
 /* 任务轮询：任何页面都能看到运行中的任务 */
@@ -416,6 +487,7 @@ async function pollJobs(){
     b.classList.toggle('hide',!running); b.textContent=running;
     b.classList.toggle('run',running>0);
     const na=$('#nav-assets'); na.classList.toggle('hide',!S.assets.length); na.textContent=S.assets.length;
+    renderSideStat();
     if(location.hash.slice(1)==='tasks' && $('#jobs-body')) renderJobs();
     if(location.hash.slice(1)==='discover' && $('#d-jobs')){
       const before = S.jobs.map(j=>j.id+':'+j.state).join(',');
@@ -426,11 +498,41 @@ async function pollJobs(){
   S.timer=setTimeout(pollJobs,1500);
 }
 
+function renderSideStat(){
+  const el=$('#side-stat-body'); if(!el) return;
+  const o=STATE.overview; if(!o){el.textContent='—';return}
+  el.innerHTML = o.exposed>0
+    ? `<span class="r">${o.exposed} 台</span> 暴露待修复<br><span class="o">${o.unknown||0} 台</span> 版本待确认`
+    : (o.unknown>0 ? `<span class="o">${o.unknown} 台</span> 版本待确认<br>其余 ${o.not_php||0} 台无关`
+                    : `<span class="g">无暴露</span><br>${o.total_assets||0} 台已核查`);
+}
+
+/* ==================== 表格排序 ==================== */
+function makeSortable(tableId,rowSel,getVal){
+  const tbl=document.getElementById(tableId); if(!tbl) return;
+  tbl.querySelectorAll('th.sortable').forEach((th,i)=>{
+    th.onclick=()=>{
+      const dir=th.classList.contains('asc')?'desc':'asc';
+      tbl.querySelectorAll('th').forEach(x=>x.classList.remove('asc','desc'));
+      th.classList.add(dir);
+      const body=tbl.querySelector('tbody');
+      const rows=[...body.querySelectorAll(rowSel)];
+      rows.sort((a,b)=>{
+        const va=String(getVal(a,i)??''), vb=String(getVal(b,i)??'');
+        const na=parseFloat(va), nb=parseFloat(vb);
+        if(va!==''&&vb!==''&&!isNaN(na)&&!isNaN(nb)) return dir==='asc'?na-nb:nb-na;
+        return dir==='asc'?va.localeCompare(vb,'zh'):vb.localeCompare(va,'zh');
+      });
+      rows.forEach(r=>body.appendChild(r));
+    };
+  });
+}
+
 /* ==================== 态势总览 ==================== */
 async function loadOverview(c){
   const o=await api('/api/overview');
   S.assets=(await api('/api/assets')).assets;
-  const exp=[['exposed',o.exposed],['patched',o.patched],['not_php',o.not_php],['unknown',o.unknown]];
+  const exp=[['exposed',o.exposed],['unknown',o.unknown],['patched',o.patched],['not_php',o.not_php]];
   const COL={'exposed':'var(--danger)','patched':'var(--ok)','not_php':'var(--border-3)','unknown':'var(--warn)'};
   const total=Math.max(1,exp.reduce((s,x)=>s+x[1],0));
   let acc=0;
@@ -449,13 +551,28 @@ async function loadOverview(c){
   const runJobs=S.jobs.filter(j=>j.active).length;
 
   c.innerHTML=`
+  ${o.exposed>0
+    ? `<div class="alert">${ico('alert')}<div class="body"><b>${o.exposed} 台资产暴露于 CVE-2026-109618 / 109619</b>
+        PHP 版本低于修复基线（8.5.12 / 8.4.27 / 8.3.36 / 8.2.35）。该漏洞已被 CISA 列入 KEV，存在在野利用，需立即处置。</div>
+        <div class="act"><button class="btn sm" onclick="location.hash='php'">查看清单</button></div></div>`
+    : (o.php_present>0
+      ? `<div class="alert warn">${ico('alert')}<div class="body"><b>${o.php_present} 台资产运行 PHP，其中 ${o.unknown} 台版本待确认</b>
+          这些设备不暴露 PHP 版本号，需人工确认后判定是否受影响。</div>
+          <div class="act"><button class="btn sm" onclick="location.hash='php'">查看</button></div></div>`
+      : (o.total_assets>0
+        ? `<div class="alert ok">${ico('check')}<div class="body"><b>当前未发现暴露资产</b>
+            已核查 ${o.total_assets} 台，其中 ${o.not_php} 台不运行 PHP，其余均已达到修复基线。</div></div>`
+        : ''))}
   <div class="grid kpis">
-    <div class="kpi"><div class="k">${ico('box','s12')}资产总数</div><div class="v num">${o.total_assets}</div><div class="d">存活 ${o.alive} · 分组 ${o.groups.length}</div></div>
-    <div class="kpi"><div class="k">${ico('code','s12')}存在 PHP</div><div class="v num">${o.php_present}</div><div class="d">未修复 <b>${o.exposed}</b></div></div>
-    <div class="kpi"><div class="k">${ico('alert','s12')}暴露待修复</div><div class="v num ${o.exposed?'danger':''}">${o.exposed}</div><div class="d">版本低于修复基线</div></div>
-    <div class="kpi"><div class="k">${ico('check','s12')}PHP 已修复</div><div class="v num ok">${o.patched}</div><div class="d">已达基线版本</div></div>
-    <div class="kpi"><div class="k">${ico('shield','s12')}不含 PHP</div><div class="v num">${o.not_php}</div><div class="d">与本漏洞无关</div></div>
-    <div class="kpi"><div class="k">${ico('clock','s12')}运行中任务</div><div class="v num">${runJobs}</div><div class="d">历史 ${o.scan_count} 次扫描</div></div>
+    <div class="kpi ${o.exposed?'primary':'quiet'}"><div class="k">${ico('alert','s12')}暴露待修复</div><div class="v num">${o.exposed}</div>
+      <div class="d">${o.exposed?'版本低于修复基线，需立即处置':'当前无暴露资产'}</div></div>
+    <div class="kpi ${o.php_present?'':'quiet'}"><div class="k">${ico('code','s12')}含 PHP 资产</div><div class="v num">${o.php_present}</div>
+      <div class="d">${o.unknown?`${o.unknown} 台版本待确认`:'版本均已确认'}</div></div>
+    <div class="kpi quiet"><div class="k">${ico('check','s12')}已修复</div><div class="v num">${o.patched}</div><div class="d">已达基线版本</div></div>
+    <div class="kpi quiet"><div class="k">${ico('shield','s12')}不含 PHP</div><div class="v num">${o.not_php}</div><div class="d">与本漏洞无关</div></div>
+    <div class="kpi quiet"><div class="k">${ico('box','s12')}资产总数</div><div class="v num">${o.total_assets}</div>
+      <div class="d">存活 ${o.alive} · ${o.groups.length} 个分组</div></div>
+    <div class="kpi quiet"><div class="k">${ico('clock','s12')}运行中任务</div><div class="v num">${runJobs}</div><div class="d">累计 ${o.scan_count} 次扫描</div></div>
   </div>
 
   <div class="chart-row">
@@ -475,7 +592,7 @@ async function loadOverview(c){
     </div>
     <div class="card">
       <div class="card-h"><h3>设备类型分布</h3><div class="sp"></div>
-        <button class="btn sm ghost" onclick="location.hash='discover'">设备发现 ${ico('x','s12')}</button></div>
+        <button class="btn sm ghost" onclick="location.hash='discover'">设备发现 →</button></div>
       <div class="card-b">
         ${types.length?types.map(([k,v])=>`<div class="bar-line">
             <span class="nm" title="${esc(k)}">${esc(k)}</span>
@@ -488,11 +605,11 @@ async function loadOverview(c){
 
   <div class="card">
     <div class="card-h"><h3>最近扫描</h3><div class="sp"></div>
-      <button class="btn sm ghost" onclick="location.hash='reports'">全部报告 ${ico('x','s12')}</button></div>
+      <button class="btn sm ghost" onclick="location.hash='reports'">全部报告 →</button></div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>扫描 ID</th><th>类型</th><th>风险</th><th>目标</th><th>严重</th><th>高危</th><th>开始时间</th><th></th></tr></thead>
       <tbody>${(o.recent_scans||[]).map(s=>`<tr>
-        <td class="mono">${esc(s.scan_id)}</td><td>${esc(s.kind)}</td>
+        <td class="mono">${esc(s.scan_id)}</td><td>${esc(KIND[s.kind]||s.kind)}</td>
         <td>${tag((RISK[s.risk]||['mute','未知'])[0],(RISK[s.risk]||['mute','未知'])[1])}</td>
         <td class="num">${s.target_count}</td>
         <td class="num">${s.severity_counts?.critical||0}</td>
@@ -623,7 +740,7 @@ async function cancelJob(id){
 
 function renderDevices(box,assets){
   if(!assets||!assets.length){box.innerHTML='<div class="empty" style="grid-column:1/-1">'+ico('radar')+
-    '<b>暂无设备</b><p>输入网段或主机列表后点击「开始扫描」</p></div>';return}
+    '<b>还没有扫描过任何设备</b><div class="guide"><ol>'+'<li>在上方填入<strong>网段</strong>（如 <code>192.168.1.0/24</code>）或<strong>主机列表</strong></li>'+'<li>选扫描深度：<strong>快速</strong>约 1.4 秒/台；<strong>深度</strong>约 2.5 秒/台（110+ 端口 + TLS 证书 + 登录路径）</li>'+'<li>点击<strong>开始扫描</strong>，后台执行，可随时切页或取消</li>'+'<li><strong>离线主机会自动排除</strong>，只有真正在线的设备进入台账</li>'+'</ol></div></div>';return}
   box.innerHTML=assets.map(a=>{
     const exp=EXP[a.exposure]||['mute',a.exposure||'未知'];
     const phpPorts=(a.services||[]).filter(s=>s.php_hint).map(s=>s.port);
@@ -702,6 +819,7 @@ async function deleteJob(id){
 }/* ==================== 资产台账 ==================== */
 async function loadAssets(c){
   const a=(await api('/api/assets')).assets; S.assets=a;
+  const selected=new Set();
   c.innerHTML=`
   <div class="page-head"><div><h2>资产台账</h2><p>共 ${a.length} 台设备</p></div><div class="sp"></div>
     <button class="btn" id="a-import">${ico('upload','s12')}批量导入</button>
@@ -726,12 +844,24 @@ async function loadAssets(c){
       <div class="seg" id="a-filter">
         <button class="on" data-f="all">全部</button><button data-f="exposed">暴露</button>
         <button data-f="patched">已修复</button><button data-f="not_php">无 PHP</button><button data-f="unknown">待确认</button></div>
+      <select id="a-type" style="max-width:190px;margin-left:8px"></select>
       <div class="sp"></div>
       <input id="a-search" placeholder="搜索 IP / 厂商 / 设备类型" style="max-width:230px">
     </div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>主机</th><th>设备类型</th><th>产品</th><th>厂商</th><th>技术栈</th><th>PHP</th>
-        <th>暴露面</th><th>置信度</th><th>分组</th><th>负责人</th><th></th></tr></thead>
+    <div class="bulk hide" id="a-bulk">
+      <span class="n">已选 <b id="a-sel-n">0</b> 台</span>
+      <button class="btn sm" id="a-bulk-group">改分组</button>
+      <button class="btn sm" id="a-bulk-owner">改负责人</button>
+      <button class="btn sm danger" id="a-bulk-del">移出台账</button>
+      <div class="sp"></div>
+      <button class="btn sm ghost" id="a-bulk-clear">取消选择</button>
+    </div>
+    <div class="tbl-wrap"><table id="a-table">
+      <thead><tr>
+        <th style="width:34px"><input type="checkbox" id="a-all"></th>
+        <th class="sortable">主机</th><th class="sortable">设备类型</th><th class="sortable">产品</th>
+        <th class="sortable">厂商</th><th class="sortable">技术栈</th><th class="sortable">PHP</th>
+        <th class="sortable">暴露面</th><th class="sortable">置信度</th><th>分组</th><th>负责人</th><th></th></tr></thead>
       <tbody id="a-body"></tbody>
     </table></div>
   </div>`;
@@ -763,17 +893,23 @@ async function loadAssets(c){
   function cidrList_push(arr,v){arr.push(v)}
   function cidrList_unique(arr){return [...new Set(arr)]}
 
+  const types=[...new Set(a.map(x=>x.device_label||'未识别设备'))].sort();
+  $('#a-type').innerHTML='<option value="">全部设备类型</option>'+types.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+
   const draw=()=>{
     const f=$('#a-filter .on').dataset.f, q=$('#a-search').value.trim().toLowerCase();
+    const ty=$('#a-type').value;
     const rows=a.filter(x=>{
       if(f==='exposed'&&x.exposure!=='exposed')return false;
       if(f==='patched'&&x.exposure!=='patched')return false;
       if(f==='not_php'&&x.exposure!=='not_php')return false;
       if(f==='unknown'&&x.exposure!=='unknown')return false;
-      if(q&&!((x.host||'')+(x.device_label||'')+(x.vendor||'')+(x.php_version||'')).toLowerCase().includes(q))return false;
+      if(ty&&(x.device_label||'未识别设备')!==ty)return false;
+      if(q&&!((x.host||'')+(x.device_label||'')+(x.vendor||'')+(x.php_version||'')+(x.product||'')).toLowerCase().includes(q))return false;
       return true;
     });
     $('#a-body').innerHTML=rows.map(x=>`<tr>
+      <td><input type="checkbox" class="a-chk" data-h="${esc(x.host)}" ${selected.has(x.host)?'checked':''}></td>
       <td class="mono h">${esc(x.host)}</td>
       <td>${ico(DEV_ICON[x.device_type]||'box','s12')} ${esc(x.device_label||'-')}</td>
       <td style="font-size:11.5px">${esc(x.product||'-')}</td>
@@ -787,7 +923,7 @@ async function loadAssets(c){
       <td style="text-align:right;white-space:nowrap">
         <button class="btn sm" onclick="event.stopPropagation();openAsset('${esc(x.host)}')">详情</button>
         <button class="btn sm ghost" onclick="event.stopPropagation();rescan('${esc(x.host)}')">复扫</button></td></tr>`).join('')
-      ||'<tr><td colspan="11"><div class="empty">'+ico('list')+'<b>没有匹配的资产</b></div></td></tr>';
+      ||'<tr><td colspan="11"><div class="empty">'+ico('list')+'<b>没有匹配的资产</b><p>换个筛选条件或清空搜索关键字试试</p></div></td></tr>';
     $$('#a-body .editable').forEach(el=>{
       el.onblur=async()=>{
         const host=el.dataset.h,k=el.dataset.k,v=el.textContent.trim();
@@ -799,7 +935,43 @@ async function loadAssets(c){
   };
   $$('#a-filter button').forEach(b=>b.onclick=()=>{$$('#a-filter button').forEach(x=>x.classList.remove('on'));
     b.classList.add('on');draw()});
+  $('#a-type').onchange=draw;
   $('#a-search').oninput=draw; draw();
+  makeSortable('a-table','tr',(tr,i)=>{
+    const tds=tr.querySelectorAll('td');
+    return (tds[i+1]?.textContent||'').trim();
+  });
+  const syncBulk=()=>{ $('#a-sel-n').textContent=selected.size;
+    $('#a-bulk').classList.toggle('hide',selected.size===0); };
+  $('#a-body').addEventListener('change',e=>{
+    if(e.target.classList.contains('a-chk')){
+      if(e.target.checked) selected.add(e.target.dataset.h); else selected.delete(e.target.dataset.h);
+      syncBulk();
+    }
+  });
+  $('#a-all').onchange=e=>{
+    $$('#a-body .a-chk').forEach(c=>{c.checked=e.target.checked;
+      if(e.target.checked) selected.add(c.dataset.h); else selected.delete(c.dataset.h)});
+    syncBulk();
+  };
+  $('#a-bulk-clear').onclick=()=>{selected.clear();draw();};
+  $('#a-bulk-group').onclick=async()=>{
+    const v=prompt('将选中的 '+selected.size+' 台资产改到哪个分组？','default');
+    if(v===null) return;
+    for(const h of selected) await api('/api/assets',{method:'PATCH',body:{host:h,group:v}});
+    toast('已更新 '+selected.size+' 台的分组','ok'); selected.clear(); await loadAssets($('#content'));
+  };
+  $('#a-bulk-owner').onclick=async()=>{
+    const v=prompt('将选中的 '+selected.size+' 台资产负责人改为什么？');
+    if(v===null) return;
+    for(const h of selected) await api('/api/assets',{method:'PATCH',body:{host:h,owner:v}});
+    toast('已更新 '+selected.size+' 台的负责人','ok'); selected.clear(); await loadAssets($('#content'));
+  };
+  $('#a-bulk-del').onclick=async()=>{
+    if(!confirm('将选中的 '+selected.size+' 台资产移出台账？')) return;
+    for(const h of selected) await api('/api/assets?host='+encodeURIComponent(h),{method:'DELETE'});
+    toast('已移除 '+selected.size+' 台','ok'); selected.clear(); await loadAssets($('#content'));
+  };
   $('#a-export').onclick=()=>{window.location='/api/assets/export'};
 }
 
@@ -988,7 +1160,7 @@ async function loadHost(c){
     <div class="sp"></div>
     <button class="btn" id="h-export">${ico('download','s12')}导出台账 CSV</button>
     <button class="btn primary" id="h-run">${ico('play','s12')}执行检测</button></div>
-  <div id="h-out"><div class="card"><div class="card-b"><div class="empty">'+ico('server')+'<b>尚未执行</b><p>点击「执行检测」开始检测当前这台机器</p></div></div></div></div>`;
+  <div id="h-out"><div class="card"><div class="card-b"><div class="empty">'+ico('server')+'<b>尚未执行</b><div class="guide"><ol>'+'<li>检查本机<strong>PHP 安装点</strong>与版本（是否低于修复基线）</li>'+'<li>核查<strong>关键配置的生效值</strong>：upload_progress / fatal_error_backtraces / memory_limit / post_max_size</li>'+'<li>扫描临时与上传目录的<strong>可疑落地文件</strong>，比对已知恶意样本哈希</li>'+'<li>枚举 <strong>PHP 派生的 shell 子进程</strong>与外部连接</li></ol>'+'<p style="margin-top:10px">全部只读，不修改任何配置或文件。</p></div></div></div></div>`;
   $('#h-run').onclick=async()=>{
     $('#h-out').innerHTML='<div class="card"><div class="card-b"><div class="empty">'+ico('clock')+'<b>检测中…</b></div></div></div>';
     try{const j=await api('/api/jobs',{method:'POST',body:{kind:'host'}});
@@ -1105,7 +1277,7 @@ async function loadReports(c){
   <div class="card"><div class="card-h"><h3>历史扫描</h3></div>
     <div class="tbl-wrap"><table><thead><tr><th>扫描 ID</th><th>类型</th><th>风险</th><th>目标</th><th>严重</th><th>高危</th><th>开始</th><th>操作</th></tr></thead>
       <tbody>${r.scans.map(s=>`<tr>
-        <td class="mono">${esc(s.scan_id)}</td><td>${esc(s.kind)}</td>
+        <td class="mono">${esc(s.scan_id)}</td><td>${esc(KIND[s.kind]||s.kind)}</td>
         <td>${tag((RISK[s.risk]||['mute','?'])[0],(RISK[s.risk]||['mute','?'])[1])}</td>
         <td class="num">${s.target_count}</td>
         <td class="num">${s.severity_counts?.critical||0}</td><td class="num">${s.severity_counts?.high||0}</td>
@@ -1115,7 +1287,7 @@ async function loadReports(c){
           <a class="btn sm ghost" href="/api/scans/${esc(s.scan_id)}/report?fmt=md" target="_blank">MD</a>
           <a class="btn sm ghost" href="/api/scans/${esc(s.scan_id)}/report?fmt=html" target="_blank">HTML</a>
           <button class="btn sm ghost" onclick="delReport('${esc(s.scan_id)}')" title="删除">${ico('trash','s12')}</button>
-        </td></tr>`).join('')||'<tr><td colspan="8"><div class="empty">'+ico('file')+'<b>暂无报告</b></div></td></tr>'}</tbody></table></div></div>`;
+        </td></tr>`).join('')||'<tr><td colspan="8"><div class="empty">'+ico('file')+'<b>还没有扫描报告</b><p>发起一次扫描后，这里会列出全部历史报告，可随时下载或删除</p></div></td></tr>'}</tbody></table></div></div>`;
 }
 async function viewReport(id){
   try{

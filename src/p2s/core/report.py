@@ -94,7 +94,7 @@ def to_markdown(result: ScanResult, path: str | Path) -> Path:
         for a in result.assets:
             v = a.get("version_verdict", {})
             lines.append(
-                f"| {a.get('url')} | {v.get('version','-')} | {a.get('fingerprint',{}).get('sapi_label','-')} "
+                f"| {a.get('host') or a.get('url')} | {v.get('version','-')} | {a.get('fingerprint',{}).get('sapi_label','-')} "
                 f"| {v.get('status','-')} | {a.get('probe_verdict','-')} | **{a.get('risk','-')}** |"
             )
         lines.append("")
