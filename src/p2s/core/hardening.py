@@ -127,7 +127,14 @@ def _q(v: str) -> str:
     return "'" + str(v).replace("'", "'\\''") + "'"
 
 
+def plan_fingerprint(host: str, target: str, actions: list[dict]) -> str:
+    """计划指纹：主机 + 目标文件 + 动作集合，用于票据绑定与包内自校验。"""
+    pairs = "|".join(sorted(f"{a['key']}={a['value']}" for a in actions))
+    return sha256_text(f"{host}|{target}|{pairs}")
+
+
 def build_pack(host: str, host_report: dict, target: str, actions: list[dict],
+               ticket: str = "",
                token: str = "", auto_reload: bool = False) -> dict[str, str]:
     """生成加固包：harden.sh / rollback.sh / diff.patch / manifest.json / README.txt。"""
     before_sha = str(host_report.get("ini_sha256") or "")
@@ -135,6 +142,9 @@ def build_pack(host: str, host_report: dict, target: str, actions: list[dict],
     ts = _now()
     _is_cli = '1' if '/cli/' in str(target) else '0'
     keys = ' '.join(str(a['key']) for a in actions)
+    # 票据与计划指纹：包内自校验，防止有人改了动作清单再执行
+    pairs = '|'.join(sorted(f"{a['key']}={a['value']}" for a in actions))
+    plan_hash = plan_fingerprint(host, target, actions)
 
     # 每项动作一条显式调用：避免 shell 动态变量与 f-string 混用
     apply_lines = "\n".join(f"apply_kv {_q(a['key'])} {_q(a['value'])}" for a in actions)
@@ -164,12 +174,23 @@ TARGET_IS_CLI={_is_cli}
 PHP_BIN={_q(php_bin)}
 EXPECT_SHA={_q(before_sha)}
 TOKEN={_q(token)}
+TICKET={_q(ticket)}
+PLAN_HASH={_q(plan_hash)}
+ACT_PAIRS={_q(pairs)}
 KEYS={_q(keys)}
 
 say() {{ printf '%s\\n' "$*"; }}
 die() {{ printf '[FAIL] %s\\n' "$*" >&2; exit "$1"; }}
 
 say "[1/5] 预检"
+# 包内自校验：动作清单被改过就拒绝执行（票据只能用于原本那一组动作）
+if [ -n "$PLAN_HASH" ]; then
+  CALC=$(printf '%s|%s|%s' {_q(host)} "$TARGET" "$ACT_PAIRS" | sha256sum | cut -d' ' -f1)
+  if [ "$CALC" != "$PLAN_HASH" ]; then
+    die 21 "加固包内容与票据不一致（可能被改动）：请重新下载"
+  fi
+fi
+if [ -n "$TICKET" ]; then say "  票据：$TICKET"; fi
 [ -f "$TARGET" ] || die 10 "目标文件不存在：$TARGET"
 [ -w "$TARGET" ] || die 11 "没有写权限（请用 root / 管理员执行）"
 if [ -f /.dockerenv ]; then die 12 "检测到容器环境：请改用 compose 挂载 php.ini"; fi
@@ -253,7 +274,7 @@ RECEIPT="/tmp/p2s-harden-receipt-$STAMP.json"
   FIRST=1
   emit() {{ if [ "$FIRST" = 1 ]; then FIRST=0; else printf ','; fi; printf '{{"key":"%s","value":"%s"}}' "$1" "$2"; }}
 {emit_lines}
-  printf '],"token":"%s","at":"%s","runtime_verified":false}}\\n' "$TOKEN" "$(date +%Y-%m-%dT%H:%M:%S)"
+  printf '],"ticket":"%s","plan_hash":"%s","token":"%s","at":"%s","runtime_verified":false}}\\n' "$TICKET" "$PLAN_HASH" "$TOKEN" "$(date +%Y-%m-%dT%H:%M:%S)"
 }} > "$RECEIPT"
 
 say "[5/5] 完成"

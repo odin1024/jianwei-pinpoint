@@ -12,6 +12,7 @@ from __future__ import annotations
 import hmac
 import io
 import json
+import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
 
@@ -33,6 +34,8 @@ router = APIRouter()
 
 HARDEN_DIR = DATA_DIR / "hardening"
 TOKEN_TTL_MINUTES = 10
+#: 票据有效期：人要走「下载→上传→执行」的流程，10 分钟不够
+TICKET_TTL_MINUTES = 120
 
 
 def _dir():
@@ -98,6 +101,25 @@ def _ini_sha(asset: dict) -> str:
     return str(hr.get("ini_sha256") or "")
 
 
+
+def _issue_ticket(host: str, target: str, plan_hash: str) -> dict:
+    """签发一次性票据：写入台账，回执时消费。"""
+    rec = _load_record(host)
+    exp = (datetime.now() + timedelta(minutes=TICKET_TTL_MINUTES)).isoformat(timespec="seconds")
+    tk = {
+        "id": "tk-" + uuid.uuid4().hex[:12],
+        "host": host,
+        "target": target,
+        "plan_hash": plan_hash,
+        "issued_at": H._now(),
+        "expires_at": exp,
+        "used_at": "",
+    }
+    rec["ticket"] = tk
+    _save_record(host, rec)
+    return tk
+
+
 @router.get("/api/hardening/plan/{host}")
 def api_hardening_plan(host: str) -> dict:
     """给出一台主机的加固方案：待改项、原因、漂移、当前状态。"""
@@ -131,7 +153,9 @@ def api_hardening_pack(host: str) -> Response:
     actions = _actions_for(a, target)
     if not actions:
         raise HTTPException(status_code=400, detail="当前没有需要加固的配置项")
-    files = H.build_pack(host, hr, target, actions)
+    plan_hash = H.plan_fingerprint(host, target, actions)
+    tk = _issue_ticket(host, target, plan_hash)
+    files = H.build_pack(host, hr, target, actions, ticket=tk["id"])
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for name, content in files.items():
@@ -156,6 +180,27 @@ def api_hardening_receipt(payload: dict) -> dict:
     issued = _load_record(host)
     if not issued:
         raise HTTPException(status_code=400, detail="该主机没有签发过加固包")
+
+    # 0) 一次性票据：必须存在、未使用、未过期、指纹一致
+    tk = issued.get("ticket") or {}
+    if tk:
+        got = str(rec.get("ticket") or "").strip()
+        if not got:
+            raise HTTPException(status_code=400, detail="回执缺少票据编号（tid）")
+        if got != str(tk.get("id")):
+            raise HTTPException(status_code=400, detail="票据编号与签发记录不一致")
+        if tk.get("used_at"):
+            raise HTTPException(status_code=409,
+                                detail=f"该票据已于 {tk['used_at']} 使用过，不能重复提交")
+        try:
+            exp = datetime.fromisoformat(str(tk.get("expires_at")))
+            if datetime.now() > exp:
+                raise HTTPException(status_code=400,
+                                    detail=f"票据已于 {tk['expires_at']} 过期，请重新下载加固包")
+        except ValueError:
+            pass
+        if rec.get("plan_hash") and str(rec["plan_hash"]) != str(tk.get("plan_hash")):
+            raise HTTPException(status_code=400, detail="回执的计划指纹与签发不一致（包可能被改动）")
 
     # 1) 动作必须是我们签发过的
     applied = {x.get("key"): str(x.get("value")) for x in (rec.get("applied") or []) if x.get("key")}
@@ -186,7 +231,9 @@ def api_hardening_receipt(payload: dict) -> dict:
             x["hardening_after_sha256"] = str(rec.get("after_sha") or "")
             _save_assets(assets)
             break
-    _save_record(host, {**issued, "verified_at": now,
+    if tk:
+        tk = {**tk, "used_at": now}
+    _save_record(host, {**issued, "ticket": tk, "verified_at": now,
                         "baseline": {k: v for k, v in applied.items()},
                         "after_sha256": str(rec.get("after_sha") or "")})
     return {"ok": True, "host": host, "verified_at": now, "applied": len(applied)}
