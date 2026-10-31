@@ -109,6 +109,14 @@ async function hardenDialog(host){
   const drift=(plan.drift||[]).map(d=>`<li><code>${esc(d.key)}</code>
       期望 ${esc(d.expected)}，实际 ${esc(d.actual)} —— ${esc(d.note)}</li>`).join('');
 
+  const pool=(plan.pool_overrides||[]).length?`<div class="hint" style="margin:8px 0;border-color:var(--warn-border);background:var(--warn-soft)">
+       <b>注意：${plan.pool_overrides.length} 处 FPM pool 级配置会盖过 php.ini</b>
+       <div style="margin-top:4px;font-size:12px;line-height:1.7">
+         ${plan.pool_overrides.map(x=>esc(x.path.split('/').pop()+' → '+x.key+' = '+x.value)).join('<br>')}
+       </div>
+       <div style="margin-top:4px;font-size:12px">只改 php.ini 对使用这些 pool 的实例无效，需同时修改 FPM pool 配置。</div>
+     </div>`:'';
+
   box.innerHTML=`<h3>配置加固 · ${esc(host)}</h3>
     <div class="mbody">
       <div class="hint" style="margin-bottom:10px">
@@ -118,6 +126,7 @@ async function hardenDialog(host){
       ${plan.target?`<div class="muted" style="font-size:11.5px;margin-bottom:8px">目标文件：<code>${esc(plan.target)}</code></div>`
         :'<div class="warn" style="margin-bottom:8px">该主机还没有 Agent 上报，无法生成方案</div>'}
       ${rows?`<div class="hd-list">${rows}</div>`:'<div class="muted">当前没有需要加固的配置项</div>'}
+      ${pool}
       ${drift?`<div class="warn" style="margin-top:10px"><b>检测到配置漂移</b><ul style="margin:6px 0 0 18px">${drift}</ul></div>`:''}
       <div class="row" style="margin-top:14px">
         ${rows?`<a class="btn primary" href="/api/hardening/pack/${encodeURIComponent(host)}">${ico('download','s12')}下载加固包</a>`:''}

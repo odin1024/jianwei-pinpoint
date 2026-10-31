@@ -112,7 +112,7 @@ def api_hardening_plan(host: str) -> dict:
         "pending": len(actions),
         "drift": H.drift(hr, (rec.get("baseline") or None)),
         # pool 级 php_admin_value 会盖过 php.ini：改了 ini 也可能不生效，必须提前告知
-        "pool_overrides": [x for x in (hr.get("pool_overrides") or []) if x.get("values")],
+        "pool_overrides": [x for x in (hr.get("pool_overrides") or []) if x.get("key")],
         "status": a.get("hardening_status") or ("pending" if actions else "ok"),
         "last_verified_at": a.get("hardening_verified_at") or "",
         "note": "" if hr else "该主机还没有 Agent 上报，无法生成加固方案",

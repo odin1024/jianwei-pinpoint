@@ -241,7 +241,7 @@ def _ingest_host_report(rep: dict, host: str, *, source: str = "agent") -> dict:
                 "ini_sha256": rep.get("ini_sha256") or "",
                 "ini_candidates": [p for p in str(rep.get("ini_candidates_raw") or "").split() if p],
                 "ini_files": _parse_ini_files(rep.get("ini_files_raw") or ""),
-                "pool_overrides": _parse_ini_files(rep.get("pool_overrides_raw") or ""),
+                "pool_overrides": _parse_pool_overrides(rep.get("pool_overrides_raw") or ""),
                 "installs": installs,
                 "settings": rep.get("settings") or [],
                 "artifacts": (rep.get("artifacts") or [])[:50],
