@@ -232,8 +232,8 @@ async function loadAssets(c){
       <td style="font-size:11.5px">${x.vendor?esc(x.vendor):'<span class="muted">-</span>'}</td>
       <td>${(x.tech_stack||[]).map(s=>tag('crit',s)).join(' ')||'<span class="muted">-</span>'}</td>
       <td class="num">${x.php_version?'<b>'+esc(x.php_version)+'</b>':(x.php_present?tag('warn','未知'):'<span class="muted">无</span>')}
-          ${(x.php_instances||[]).length>1?`<div class="muted" style="font-size:10.5px"
-            title="${esc((x.php_instances||[]).map(i=>':'+i.port+'='+i.version).join('  '))}">${x.php_instances.length} 个实例</div>`:''}</td>
+          ${(x.php_instances||[]).length>1?`<span class="muted" style="font-size:10.5px;margin-left:5px;white-space:nowrap"
+            title="${esc((x.php_instances||[]).map(i=>':'+i.port+'='+i.version).join('  '))}">${x.php_instances.length}个</span>`:''}</td>
       <td>${tag((EXP[x.exposure]||['mute','?'])[0],(EXP[x.exposure]||['mute','?'])[1])}</td>
       <td>${(x.change && (x.change.kind==='new'
             || Object.keys(x.change.fields||{}).some(k=>['exposure','php_version','risk','sapi','alive'].includes(k))))
