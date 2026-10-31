@@ -15,29 +15,45 @@ import json
 from datetime import datetime, timezone
 from typing import Optional
 
+from . import rulebook
+
 #: 加固动作白名单：平台只会生成这三种，Agent/脚本也只会执行这三种
 ACTION_WHITELIST = ("php.ini.set", "file.backup", "service.reload")
 
-#: 建议值来源：官方公告的缓解配置 + 社区实践（见 docs/03-情报/同类工具调研与借鉴.md）
-RECOMMENDED: tuple[tuple[str, str, str, str], ...] = (
-    (
-        "session.upload_progress.enabled", "0", "critical",
-        "php2shell 两条 CVE 共用的主触发点。rfc1867 上传进度处理器在 SAPI 启动阶段执行，"
-        "早于应用代码，因此**即使站点不调用 session_start() 也可能被利用**（Chain E）。",
-    ),
-    (
-        "session.use_only_cookies", "1", "high",
-        "拒绝通过 URL/表单参数接受会话 ID，封堵把 PHPSESSID 当表单字段提交的会话固定手法。",
-    ),
-    (
-        "session.use_strict_mode", "1", "medium",
-        "拒绝客户端自选未初始化的会话 ID，降低会话固定与链式利用成功率。",
-    ),
-    (
-        "display_errors", "0", "low",
-        "生产环境不回显内部错误，避免 OOM/崩溃细节被用来判断利用是否成功。",
-    ),
+#: 参与自动加固的键（从规则库挑"标准明确、副作用可控"的一批）。
+#: 前 4 条与漏洞公告直接相关，固定排在最前，报告与弹窗优先展示。
+_PLAN_KEYS: tuple[str, ...] = (
+    "session.upload_progress.enabled",
+    "session.use_only_cookies",
+    "session.use_strict_mode",
+    "display_errors",
+    "expose_php",
+    "display_startup_errors",
+    "session.use_trans_sid",
+    "session.upload_progress.cleanup",
+    "session.cookie_httponly",
+    "session.cookie_lifetime",
+    "session.sid_length",
+    "session.sid_bits_per_character",
+    "cgi.fix_pathinfo",
+    "assert.active",
+    "zend.assertions",
 )
+
+
+def _build_recommended() -> tuple[tuple[str, str, str, str], ...]:
+    """建议值统一取自规则库（rulebook），避免两处各写一份、日后不一致。"""
+    by_key = {r.key: r for r in rulebook.auto_rules() if r.target == "ini"}
+    out: list[tuple[str, str, str, str]] = []
+    for key in _PLAN_KEYS:
+        r = by_key.get(key)
+        if r is None:
+            continue
+        out.append((r.key, r.recommended, r.risk, r.why))
+    return tuple(out)
+
+
+RECOMMENDED: tuple[tuple[str, str, str, str], ...] = _build_recommended()
 
 
 def _now() -> str:

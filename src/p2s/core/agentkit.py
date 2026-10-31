@@ -133,7 +133,7 @@ for _f in /etc/php/*/fpm/php.ini /etc/php/*/apache2/php.ini /etc/php/*/cli/php.i
 done
 
 INI_FILES=""
-INI_KEYS_SCAN="session.upload_progress.enabled session.use_only_cookies session.use_strict_mode display_errors"
+INI_KEYS_SCAN="session.upload_progress.enabled session.use_only_cookies session.use_strict_mode session.use_trans_sid session.upload_progress.cleanup session.cookie_httponly session.cookie_lifetime session.sid_length session.sid_bits_per_character display_errors display_startup_errors expose_php cgi.fix_pathinfo assert.active zend.assertions"
 for _f in $INI_CANDS; do
   _vals=""
   for _k in $INI_KEYS_SCAN; do

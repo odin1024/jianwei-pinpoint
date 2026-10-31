@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from ..core import hardening as H
+from ..core import rulebook
 from .deps import (
     ADMIN_USER,
     DATA_DIR,
@@ -267,3 +268,19 @@ def _actions_for(asset: dict, target: str) -> list[dict]:
             synth = {"settings": [{"name": k, "actual": v} for k, v in vals.items()]}
             return H.plan_actions(synth, target)
     return H.plan_actions(hr, target)
+
+
+@router.get("/api/hardening/rules")
+def api_hardening_rules(category: str = "", auto: bool | None = None) -> dict:
+    """规则库清单：可按分类与是否可自动执行过滤。"""
+    rules = list(rulebook.ALL)
+    if category:
+        rules = [r for r in rules if r.category == category]
+    if auto is not None:
+        rules = [r for r in rules if r.auto is auto]
+    return {
+        "total": len(rules),
+        "stats": rulebook.stats(),
+        "categories": list(rulebook.CATEGORIES),
+        "rules": [r.to_dict() for r in rules],
+    }
