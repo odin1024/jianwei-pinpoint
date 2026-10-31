@@ -9,148 +9,70 @@
 """
 from __future__ import annotations
 
-import ipaddress
 import json
-import os
-import re
-import threading
+import time
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
-from ..core import discovery, hostcheck, logscan
-from ..core import probe as probe_mod
-from ..core import report as report_mod
+from .. import __version__ as VERSION
 from ..core.ioc import IocLibrary
-from ..core.jobs import JobManager
-from ..core.rules import RULES, coverage_report
-from ..core.versions import FIXED_RELEASES, classify
-from .ui import DASHBOARD_HTML
+from ..core.rules import RULES
+from ..core.versions import FIXED_RELEASES
+from .ui import DASHBOARD_HTML, LOGIN_HTML
 
 app = FastAPI(
     title="p2s — php2shell 检测控制台",
     description="CVE-2026-109618 / CVE-2026-109619 检测与暴露面评估",
-    version="0.2.0",
+    version=VERSION,
 )
 
-DATA_DIR = Path(os.environ.get("P2S_DATA_DIR", "./p2s-data"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-ASSETS_FILE = DATA_DIR / "assets.json"
-SCANS_DIR = DATA_DIR / "scans"
+# 共享底座（路径/存储/鉴权/任务/CSV）已拆到 deps.py
+from .deps import *  # noqa: F401,F403,E402
 
-_lock = threading.Lock()
-JOBS = JobManager(DATA_DIR, max_workers=1)
+
+@app.middleware("http")
+async def _auth_and_headers(request: Request, call_next):
+    path = request.url.path
+    if path in _UNAUTH_OK or _session_valid(request.cookies.get(SESSION_COOKIE)):
+        response = await call_next(request)
+    elif path.startswith("/api/"):
+        return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401)
+    else:
+        return RedirectResponse(url="/login", status_code=302)
+
+    # 控制台是单页 + 内联样式脚本，缓存旧版本会让"改了看不到"，
+    # 对 HTML 一律禁缓存；静态资源本来就没有外链，不影响性能。
+    # 审计：记录所有写操作（失败不影响主请求）
+    try:
+        record_audit(request.method, path, response.status_code,
+                     ADMIN_USER if _session_valid(request.cookies.get(SESSION_COOKIE)) else "",
+                     request.client.host if request.client else "")
+    except Exception:
+        pass
+
+    ctype = response.headers.get("Content-Type", "")
+    if "text/html" in ctype:
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    return response
 
 
 # --------------------------------------------------------------------------
 # 存储
 # --------------------------------------------------------------------------
-def _load_assets() -> list[dict]:
-    if not ASSETS_FILE.exists():
-        return []
-    try:
-        return json.loads(ASSETS_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-
-
-def _save_assets(assets: list[dict]) -> None:
-    ASSETS_FILE.write_text(json.dumps(assets, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _new_scan(kind: str) -> report_mod.ScanResult:
-    return report_mod.ScanResult(
-        scan_id=f"{kind}-{uuid.uuid4().hex[:10]}",
-        kind=kind,
-        started_at=datetime.now().isoformat(timespec="seconds"),
-    )
-
-
-def _persist(res: report_mod.ScanResult) -> None:
-    SCANS_DIR.mkdir(parents=True, exist_ok=True)
-    base = SCANS_DIR / res.scan_id
-    report_mod.to_json(res, base.with_suffix(".json"))
-    report_mod.to_markdown(res, base.with_suffix(".md"))
-    report_mod.to_html(res, base.with_suffix(".html"))
-    res.finished_at = datetime.now().isoformat(timespec="seconds")
-
-
-def _asset_from_profile(prof: discovery.DeviceProfile, group: str, owner: str, note: str) -> dict:
-    return {
-        "id": uuid.uuid4().hex[:12],
-        "host": prof.host,
-        "group": group,
-        "owner": owner,
-        "note": note,
-        "alive": prof.alive,
-        "device_type": prof.device_type,
-        "device_label": prof.device_label,
-        "product": prof.product,
-        "vendor": prof.vendor,
-        "os_hint": prof.os_hint,
-        "tech_stack": prof.tech_stack,
-        "mac": prof.mac,
-        "mac_vendor": prof.mac_vendor,
-        "open_ports": prof.open_ports,
-        "meaningful_ports": prof.meaningful_ports,
-        "noise_ports": prof.noise_ports,
-        "candidates": prof.candidates,
-        "services": [s.to_dict() for s in prof.services],
-        "php_present": prof.php_present,
-        "php_version": prof.php_version,
-        "sapi": prof.sapi,
-        "exposure": prof.exposure,
-        "risk": prof.risk,
-        "confidence": prof.confidence,
-        "evidence": prof.evidence,
-        "remediation": prof.remediation,
-        "errors": prof.errors,
-        "last_checked": prof.scanned_at,
-    }
 
 
 # --------------------------------------------------------------------------
 # 模型
 # --------------------------------------------------------------------------
-class DiscoverIn(BaseModel):
-    hosts: list[str] = []
-    cidr: str = ""
-    group: str = "default"
-    owner: str = ""
-    note: str = ""
-    timeout: float = 1.2
-    http_timeout: float = 8.0
-    quick: bool = False
-    save: bool = True
-
-
-class AssetIn(BaseModel):
-    host: str
-    group: str = "default"
-    owner: str = ""
-    note: str = ""
-    discover: bool = True
-
-
-class ImportIn(BaseModel):
-    text: str
-    group: str = "default"
-    owner: str = ""
-
-
-class UrlScanIn(BaseModel):
-    url: str
-    do_probe: bool = True
-    timeout: float = 15.0
-
-
-class LogScanIn(BaseModel):
-    path: str
 
 
 class AgentReportIn(BaseModel):
@@ -158,14 +80,43 @@ class AgentReportIn(BaseModel):
     data: dict[str, Any] = {}
 
 
-def _expand_cidr(cidr: str, limit: int = 1024) -> list[str]:
-    try:
-        net = ipaddress.ip_network(cidr, strict=False)
-    except ValueError:
-        return []
-    if net.num_addresses > limit:
-        raise HTTPException(status_code=400, detail=f"网段过大（{net.num_addresses} 台），上限 {limit} 台")
-    return [str(h) for h in net.hosts()]
+
+
+# --------------------------------------------------------------------------
+# 登录
+# --------------------------------------------------------------------------
+class LoginIn(BaseModel):
+    username: str = ADMIN_USER
+    password: str = ""
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page() -> str:
+    return LOGIN_HTML
+
+
+@app.post("/api/login")
+def api_login(body: LoginIn) -> Response:
+    if not _credentials_ok(body.username, body.password):
+        time.sleep(0.4)          # 拖慢暴力破解
+        raise HTTPException(status_code=401, detail="口令错误")
+    sid = _issue_session()
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(
+        SESSION_COOKIE, sid, max_age=SESSION_TTL, httponly=True, samesite="lax", path="/"
+    )
+    return resp
+
+
+@app.post("/api/logout")
+def api_logout(request: Request) -> Response:
+    sid = request.cookies.get(SESSION_COOKIE)
+    if sid:
+        with _sessions_lock:
+            _sessions.pop(sid, None)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
 
 
 # --------------------------------------------------------------------------
@@ -173,19 +124,17 @@ def _expand_cidr(cidr: str, limit: int = 1024) -> list[str]:
 # --------------------------------------------------------------------------
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "time": datetime.now().isoformat(timespec="seconds"), "version": "0.2.0"}
+    return {"status": "ok", "time": datetime.now().isoformat(timespec="seconds"), "version": VERSION}
+
+
+#: 扫描报告摘要键：列表页只需要这些，不必把每份报告里的 assets/findings 全传出去
 
 
 @app.get("/api/overview")
 def api_overview() -> dict:
     assets = _load_assets()
-    scans: list[dict] = []
-    if SCANS_DIR.exists():
-        for p in sorted(SCANS_DIR.glob("*.json")):
-            try:
-                scans.append(json.loads(p.read_text(encoding="utf-8")))
-            except json.JSONDecodeError:
-                continue
+    scans = _load_scans(50)
+    scan_total = len(list(SCANS_DIR.glob("*.json"))) if SCANS_DIR.exists() else 0
 
     by_type: dict[str, int] = {}
     by_exposure: dict[str, int] = {}
@@ -200,6 +149,17 @@ def api_overview() -> dict:
         if a.get("php_version"):
             php_versions[a["php_version"]] = php_versions.get(a["php_version"], 0) + 1
 
+    # 资产变化：从最近若干次扫描的 changes 里聚合
+    change_counts = {"new": 0, "changed": 0, "gone": 0}
+    recent_changes: list[dict] = []
+    for s in scans[:20]:
+        for ch in s.get("changes") or []:
+            kind = ch.get("kind")
+            if kind in change_counts:
+                change_counts[kind] += 1
+            recent_changes.append(ch)
+    recent_changes = recent_changes[:20]
+
     return {
         "total_assets": len(assets),
         "alive": sum(1 for a in assets if a.get("alive")),
@@ -213,248 +173,41 @@ def api_overview() -> dict:
         "by_risk": by_risk,
         "php_versions": php_versions,
         "fixed_releases": FIXED_RELEASES,
-        "scan_count": len(scans),
-        "recent_scans": scans[:8],
+        "scan_count": scan_total,
+        "config_issues": sum(1 for a in assets if a.get("host_issues")),
+        "recent_scans": [_scan_summary(s) for s in scans[:8]],
         "groups": sorted({a.get("group", "default") for a in assets}),
+        "changes": change_counts,
+        "recent_changes": recent_changes,
     }
 
 
 # --------------------------------------------------------------------------
 # 设备发现
+#
+# 注意：这里不再保留同步版本的 /api/discover —— 网段扫描是分钟级操作，
+# 同步端点会占住线程池、绕过任务队列、也无法取消。统一走 /api/jobs。
 # --------------------------------------------------------------------------
-@app.post("/api/discover")
-def api_discover(body: DiscoverIn) -> dict:
-    hosts = [h.strip() for h in body.hosts if h and h.strip()]
-    if body.cidr:
-        hosts.extend(_expand_cidr(body.cidr))
-    hosts = list(dict.fromkeys(hosts))
-    if not hosts:
-        raise HTTPException(status_code=400, detail="请提供主机或网段")
-
-    profiles: list[dict] = []
-    for h in hosts:
-        prof = discovery.discover(
-            h, timeout=body.timeout, http_timeout=body.http_timeout, deep=not body.quick
-        )
-        profiles.append(_asset_from_profile(prof, body.group, body.owner, body.note))
-
-    if body.save and profiles:
-        with _lock:
-            assets = _load_assets()
-            by_host = {a["host"]: a for a in assets}
-            for pr in profiles:
-                old = by_host.get(pr["host"])
-                if old:
-                    pr.update({"id": old["id"], "group": old.get("group", body.group),
-                               "owner": old.get("owner", body.owner)})
-                by_host[pr["host"]] = pr
-            _save_assets(list(by_host.values()))
-
-    res = _new_scan("discover")
-    res.target_count = len(profiles)
-    res.assets = profiles
-    _persist(res)
-    return {"scan_id": res.scan_id, "count": len(profiles), "assets": profiles}
 
 
 # --------------------------------------------------------------------------
 # 资产台账
 # --------------------------------------------------------------------------
-@app.get("/api/assets")
-def api_assets() -> dict:
-    return {"assets": _load_assets()}
+# 资产台账路由已拆到 assets_api.py
+from .assets_api import AssetIn, api_php_exposure  # noqa: F401  兼容再导出（导出接口仍在此文件复用）
+from .assets_api import router as assets_router
 
+app.include_router(assets_router)
 
-@app.post("/api/assets")
-def api_add_asset(body: AssetIn) -> dict:
-    host = body.host.strip()
-    if not host:
-        raise HTTPException(status_code=400, detail="主机不能为空")
-    prof = discovery.discover(host, timeout=1.2, http_timeout=8.0)
-    rec = _asset_from_profile(prof, body.group, body.owner, body.note)
-    with _lock:
-        assets = _load_assets()
-        assets = [a for a in assets if a.get("host") != host]
-        assets.append(rec)
-        _save_assets(assets)
-    return {"ok": True, "asset": rec, "total": len(assets)}
-
-
-@app.post("/api/assets/import")
-def api_import_assets(body: ImportIn) -> dict:
-    hosts = [h.strip() for h in body.text.replace(",", "\n").splitlines() if h.strip() and not h.startswith("#")]
-    hosts = list(dict.fromkeys(hosts))
-    if not hosts:
-        raise HTTPException(status_code=400, detail="没有解析到有效主机")
-    added = 0
-    with _lock:
-        assets = _load_assets()
-        by_host = {a["host"]: a for a in assets}
-        for h in hosts:
-            if h in by_host:
-                continue
-            prof = discovery.discover(h, timeout=1.0, http_timeout=6.0, deep=False)
-            by_host[h] = _asset_from_profile(prof, body.group, body.owner, "")
-            added += 1
-        _save_assets(list(by_host.values()))
-    return {"ok": True, "added": added, "total": len(by_host)}
-
-
-@app.delete("/api/assets")
-def api_del_asset(host: str) -> dict:
-    with _lock:
-        assets = _load_assets()
-        before = len(assets)
-        assets = [a for a in assets if a.get("host") != host]
-        _save_assets(assets)
-    return {"ok": True, "removed": before - len(assets), "total": len(assets)}
-
-
-@app.patch("/api/assets")
-def api_update_asset(payload: dict) -> dict:
-    host = payload.get("host")
-    if not host:
-        raise HTTPException(status_code=400, detail="缺少 host")
-    with _lock:
-        assets = _load_assets()
-        found = False
-        for a in assets:
-            if a.get("host") == host:
-                for k in ("group", "owner", "note"):
-                    if k in payload:
-                        a[k] = payload[k]
-                found = True
-        _save_assets(assets)
-    if not found:
-        raise HTTPException(status_code=404, detail="资产不存在")
-    return {"ok": True}
-
-
-@app.post("/api/assets/rescan")
-def api_rescan(body: dict) -> dict:
-    host = body.get("host")
-    if not host:
-        raise HTTPException(status_code=400, detail="缺少 host")
-    prof = discovery.discover(host, timeout=1.2, http_timeout=8.0)
-    rec = _asset_from_profile(prof, body.get("group", "default"), body.get("owner", ""), body.get("note", ""))
-    with _lock:
-        assets = _load_assets()
-        out = []
-        replaced = False
-        for a in assets:
-            if a.get("host") == host:
-                rec["id"] = a.get("id", rec["id"])
-                rec["group"] = a.get("group", rec["group"])
-                rec["owner"] = a.get("owner", rec["owner"])
-                out.append(rec)
-                replaced = True
-            else:
-                out.append(a)
-        if not replaced:
-            out.append(rec)
-        _save_assets(out)
-    return {"ok": True, "asset": rec}
-
-
-@app.get("/api/assets/export")
-def api_export_assets() -> str:
-    assets = _load_assets()
-    rows = ["host,device_type,device_label,vendor,php_present,php_version,sapi,exposure,risk,open_ports"]
-    for a in assets:
-        rows.append(
-            ",".join(
-                str(x).replace(",", " ") for x in [
-                    a.get("host", ""), a.get("device_type", ""), a.get("device_label", ""),
-                    a.get("vendor") or "", a.get("php_present"), a.get("php_version") or "",
-                    a.get("sapi") or "", a.get("exposure", ""), a.get("risk", ""),
-                    " ".join(str(p) for p in a.get("open_ports", [])),
-                ]
-            )
-        )
-    return "\n".join(rows)
-
-
-# --------------------------------------------------------------------------
-# PHP 暴露面
-# --------------------------------------------------------------------------
-@app.get("/api/php-exposure")
-def api_php_exposure() -> dict:
-    assets = [a for a in _load_assets() if a.get("php_present")]
-    rows = []
-    for a in assets:
-        v = classify(a.get("php_version")) if a.get("php_version") else None
-        rows.append({
-            "host": a.get("host"),
-            "device_label": a.get("device_label"),
-            "php_version": a.get("php_version"),
-            "sapi": a.get("sapi"),
-            "status": v.status if v else "unknown",
-            "fixed_release": v.fixed_release if v else None,
-            "reason": v.reason if v else "未能确定版本",
-            "exposure": a.get("exposure"),
-            "risk": a.get("risk"),
-            "owner": a.get("owner", ""),
-            "group": a.get("group", ""),
-            "remediation": a.get("remediation", []),
-        })
-    rows.sort(key=lambda r: ({"critical": 0, "medium": 1, "low": 2}.get(r.get("risk", "low"), 3), r.get("host") or ""))
-    return {"rows": rows, "fixed_releases": FIXED_RELEASES}
 
 
 # --------------------------------------------------------------------------
 # 扫描
+#
+# 只保留 URL 探测的后台执行入口（_run_url）。原先的同步 /api/scan/url、
+# /api/scan/logs、/api/scan/host 一律移除：它们绕过任务队列，且 scan/logs
+# 直接读任意路径构成任意文件读取。
 # --------------------------------------------------------------------------
-@app.post("/api/scan/url")
-def api_scan_url(body: UrlScanIn) -> dict:
-    url = body.url if body.url.startswith("http") else f"http://{body.url}"
-    res = _new_scan("url")
-    res.target_count = 1
-    asm = probe_mod.assess(url, timeout=body.timeout, do_probe=body.do_probe)
-    res.assets.append(asm.to_dict())
-    _persist(res)
-    return res.to_dict()
-
-
-@app.post("/api/scan/logs")
-def api_scan_logs(body: LogScanIn) -> dict:
-    p = Path(body.path)
-    if not p.exists():
-        raise HTTPException(status_code=400, detail=f"日志文件不存在: {body.path}")
-    res = _new_scan("logs")
-    lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    records = list(logscan.iter_records(lines))
-    res.target_count = len(records)
-    fields: set[str] = set()
-    for r in records:
-        fields |= r.fields()
-    res.coverage = coverage_report(fields)
-    res.coverage["parsed_records"] = len(records)
-    res.coverage["total_lines"] = len(lines)
-    res.findings = [f.to_dict() for f in logscan.scan_records(records)]
-    _persist(res)
-    return res.to_dict()
-
-
-@app.post("/api/scan/host")
-def api_scan_host() -> dict:
-    res = _new_scan("host")
-    rep = hostcheck.run_host_check(deep=True)
-    res.target_count = 1
-    res.host_reports = [rep.to_dict()]
-    for a in rep.artifacts:
-        res.findings.append({
-            "rule_id": "P2S-HOST-001",
-            "rule_name": f"主机侧痕迹: {a.get('kind')}",
-            "severity": a.get("severity", "medium"),
-            "dimension": "host",
-            "cves": list(("CVE-2026-109618", "CVE-2026-109619")),
-            "ts": rep.checked_at,
-            "ip": rep.hostname,
-            "uri": a.get("path"),
-            "evidence": a.get("detail"),
-        })
-    _persist(res)
-    return res.to_dict()
 
 
 # --------------------------------------------------------------------------
@@ -465,72 +218,159 @@ def api_rules() -> dict:
     return {"count": len(RULES), "rules": [r.to_dict() for r in RULES]}
 
 
-@app.get("/api/rules/export/{fmt}")
-def api_rules_export(fmt: str) -> str:
-    """导出规则：sigma / modsecurity / suricata。"""
-    if fmt == "sigma":
-        out: list[str] = []
-        for r in RULES:
-            out.append(f"""---
-title: {r.name}
-id: {uuid.uuid5(uuid.NAMESPACE_DNS, r.id).hex}
-status: experimental
-description: >
-  {r.description}
-author: p2s
-date: {datetime.now().date().isoformat()}
-logsource:
-  category: webserver
-detection:
-  selection:
-    keyword:
-{chr(10).join('      - ' + k for k in ['PHP_SESSION_UPLOAD_PROGRESS', 'PHPSESSID', '<?php', '|O:', 'chunked', 'sess_', 'Allowed memory size', 'Session object destruction failed', 'php2shell'])}
-  condition: selection
-level: {r.severity}
-tags:
-  - cve.2026.109618
-  - cve.2026.109619
-""")
-        return "\n".join(out)
+#: 规则 → 导出用的关键字（Sigma / IDS 只能做字面量匹配，映射到规则的主特征串）
+_RULE_KEYWORDS: dict[str, list[str]] = {
+    "upload_progress": ["PHP_SESSION_UPLOAD_PROGRESS"],
+    "phpsessid_in_body": ["PHPSESSID"],
+    "php_in_filename": ["<?php", "<?="],
+    "serialized_in_filename": ["|O:", "|C:", "|a:"],
+    "oversized_filename": ["Content-Disposition: form-data"],
+    "chunked_multipart": ["chunked"],
+    "session_path_in_uri": ["sess_"],
+    "oom_in_response": ["Allowed memory size"],
+    "session_destruction_failed": ["Session object destruction failed"],
+    "anomalous_sessionid_length": ["PHPSESSID="],
+    "probe_burst": ["PHP_SESSION_UPLOAD_PROGRESS"],
+    "scanner_user_agent": ["php2shell", "p2srun"],
+    "vulnerable_version_banner": ["X-Powered-By"],
+}
 
-    if fmt == "modsecurity":
-        lines = [
-            "# p2s — php2shell ModSecurity 规则",
-            "# 放置到 modsecurity conf.d 目录后 reload 即可",
-            "",
-            'SecRule REQUEST_METHOD "POST" \\',
-            '    "id:9900100,phase:2,deny,status:403,log,',
-            "    msg:'p2s: php2shell upload_progress 探测',",
-            "    tag:'CVE-2026-109618',tag:'CVE-2026-109619',severity:'CRITICAL',chain'",
-            '    SecRule REQUEST_BODY "@contains PHP_SESSION_UPLOAD_PROGRESS" \\',
-            '        "chain"',
-            '        SecRule REQUEST_HEADERS:Content-Type "@contains multipart/form-data"',
-            "",
-            'SecRule MULTIPART_FILENAME "@rx <\\?(?:php|=)" \\',
-            '    "id:9900102,phase:2,deny,status:403,log,',
-            "    msg:'p2s: 上传文件名含 PHP 代码',severity:'CRITICAL'",
-            "",
-            'SecRule MULTIPART_FILENAME "@rx \\|(?:O|C|a|r):\\d+:" \\',
-            '    "id:9900103,phase:2,deny,status:403,log,',
-            "    msg:'p2s: 上传文件名含序列化对象',severity:'CRITICAL'",
-            "",
-            'SecRule RESPONSE_BODY "@contains Session object destruction failed" \\',
-            '    "id:9900105,phase:4,log,pass,',
-            "    msg:'p2s: 会话销毁失败（陈旧状态利用证据）',severity:'CRITICAL'",
-        ]
-        return "\n".join(lines)
+#: 规则所需字段 → Suricata 粘性缓冲区
+_SURICATA_BUFFER = {
+    "body": "http_client_body",
+    "req_headers": "http_header",
+    "uri": "http_uri",
+    "ua": "http_user_agent",
+    "resp_body": "file_data",
+    "resp_headers": "http_header",
+}
 
-    if fmt == "suricata":
-        lines = ["# p2s — php2shell Suricata 规则"]
-        for i, r in enumerate(RULES):
-            lines.append(
-                f'alert http any any -> any any (msg:"p2s {r.id} {r.name}"; '
-                f'flow:established,to_server; content:"PHP_SESSION_UPLOAD_PROGRESS"; '
-                f"nocase; classtype:{r.severity}; sid:9900{100 + i}; rev:1;)"
+_SURICATA_CLASSTYPE = {
+    "critical": "web-application-attack",
+    "high": "web-application-attack",
+    "medium": "policy-violation",
+    "low": "misc-activity",
+    "info": "misc-activity",
+}
+
+
+def _rule_keywords(matcher: str | None) -> list[str]:
+    return _RULE_KEYWORDS.get(matcher or "", ["PHP_SESSION_UPLOAD_PROGRESS"])
+
+
+def _yaml_quote(s: str) -> str:
+    """用 JSON 字符串作 YAML 标量：对 `<?php`、`|O:` 这类字符都安全。"""
+    return json.dumps(s, ensure_ascii=False)
+
+
+def _export_sigma() -> str:
+    today = datetime.now().date().isoformat()
+    blocks: list[str] = []
+    for r in RULES:
+        kws = "\n".join(f"      - {_yaml_quote(k)}" for k in _rule_keywords(r.matcher))
+        blocks.append(
+            "\n".join(
+                [
+                    "title: " + _yaml_quote(f"p2s {r.id} {r.name}"),
+                    "id: " + uuid.uuid5(uuid.NAMESPACE_DNS, r.id).hex,
+                    "status: experimental",
+                    "description: " + _yaml_quote(r.description),
+                    "references:",
+                    "  - " + _yaml_quote("https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w"),
+                    "  - " + _yaml_quote("https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp"),
+                    "author: p2s",
+                    f"date: {today}",
+                    "tags:",
+                    "  - cve.2026.109618",
+                    "  - cve.2026.109619",
+                    "logsource:",
+                    "  category: webserver",
+                    "detection:",
+                    "  keywords:",
+                    kws,
+                    "  condition: keywords",
+                    f"level: {r.severity}",
+                    f"# matcher={r.matcher} requires={r.requires} dimension={r.dimension}",
+                ]
             )
-        return "\n".join(lines)
+        )
+    return "\n---\n".join(blocks) + "\n"
 
-    raise HTTPException(status_code=400, detail="仅支持 sigma / modsecurity / suricata")
+
+#: 规则所需字段 → ModSecurity 变量（每条规则取主特征串，单条 SecRule，便于维护）
+_MODSEC_VAR = {
+    "body": "REQUEST_BODY",
+    "req_headers": "REQUEST_HEADERS",
+    "uri": "REQUEST_URI",
+    "ua": "REQUEST_HEADERS:User-Agent",
+    "resp_body": "RESPONSE_BODY",
+    "resp_headers": "RESPONSE_HEADERS",
+    "any": "REQUEST_URI",
+}
+
+
+def _export_modsecurity() -> str:
+    lines = [
+        "# p2s — php2shell ModSecurity 规则（自动生成，勿手改）",
+        "# 放置到 modsecurity 的 conf.d 目录后 reload 即可",
+        "SecRuleEngine On",
+        "",
+    ]
+    for idx, r in enumerate(RULES):
+        rule_id = 9900100 + idx * 10
+        kw = _rule_keywords(r.matcher)[0].replace('"', '\\"')
+        phase = 4 if r.requires in ("resp_body", "resp_headers") else 2
+        var = _MODSEC_VAR.get(r.requires, "REQUEST_URI")
+        msg = f"p2s {r.id} {r.name}".replace("'", "’")
+        lines.append(
+            f'SecRule {var} "@contains {kw}" \\\n'
+            f'    "id:{rule_id},phase:{phase},pass,log,'
+            f"tag:'CVE-2026-109618',tag:'CVE-2026-109619',"
+            f"severity:'{r.severity.upper()}',msg:'{msg}'\""
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _export_suricata() -> str:
+    lines = [
+        "# p2s — php2shell Suricata 规则（自动生成）",
+        "# 每条规则对应核心 detectors/rules.py 里的一条检测规则",
+    ]
+    for idx, r in enumerate(RULES):
+        kw = _rule_keywords(r.matcher)[0].replace("\\", "\\\\").replace('"', '\\"')
+        msg = f"p2s {r.id} {r.name}".replace('"', "'")
+        buf = _SURICATA_BUFFER.get(r.requires, "")
+        sticky = f" {buf};" if buf else ""
+        ctype = _SURICATA_CLASSTYPE.get(r.severity, "misc-activity")
+        lines.append(
+            f'alert http any any -> any any (msg:"{msg}"; '
+            f"flow:established,to_server; content:\"{kw}\"; nocase;{sticky} "
+            f"classtype:{ctype}; sid:{9900100 + idx * 10}; rev:1;)"
+        )
+    return "\n".join(lines)
+
+
+@app.get("/api/rules/export/{fmt}")
+def api_rules_export(fmt: str) -> Response:
+    """导出规则：sigma / modsecurity / suricata。
+
+    导出内容由 RULES 数据驱动，不是写死的模板 —— 加一条规则就会多一条导出。
+    """
+    builders = {
+        "sigma": (_export_sigma, "text/yaml; charset=utf-8", "p2s-php2shell.sigma.yml"),
+        "modsecurity": (_export_modsecurity, "text/plain; charset=utf-8",
+                        "p2s-php2shell-modsecurity.conf"),
+        "suricata": (_export_suricata, "text/plain; charset=utf-8",
+                     "p2s-php2shell-suricata.rules"),
+    }
+    if fmt not in builders:
+        raise HTTPException(status_code=400, detail="仅支持 sigma / modsecurity / suricata")
+    fn, media, filename = builders[fmt]
+    return Response(
+        content=fn(),
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/ioc")
@@ -546,340 +386,120 @@ def api_ioc() -> dict:
     }
 
 
-@app.get("/api/scans")
-def api_scans() -> dict:
-    out = []
-    if SCANS_DIR.exists():
-        for p in sorted(SCANS_DIR.glob("*.json")):
-            try:
-                out.append(json.loads(p.read_text(encoding="utf-8")))
-            except json.JSONDecodeError:
-                continue
-    return {"scans": out}
+# 扫描/任务路由已拆到 scan_api.py
+from .hardening_api import router as hardening_router
+from .ops_api import record_audit, start_scheduler
+from .ops_api import router as ops_router
+from .scan_api import _is_specific_product  # noqa: F401  兼容再导出（测试从这里取）
+from .scan_api import router as scan_router
+
+app.include_router(scan_router)
+app.include_router(ops_router)
+app.include_router(hardening_router)
 
 
-@app.get("/api/scans/{scan_id}/report", response_class=PlainTextResponse)
-def api_report(scan_id: str, fmt: str = "md") -> str:
-    p = SCANS_DIR / f"{scan_id}.{fmt}"
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="报告不存在")
-    if fmt == "html":
-        return HTMLResponse(p.read_text(encoding="utf-8"))  # type: ignore[return-value]
-    return p.read_text(encoding="utf-8")
 
 
-@app.post("/api/agent/report")
-def api_agent_report(body: AgentReportIn) -> dict:
-    res = _new_scan("agent")
-    res.target_count = 1
-    data = body.data or {}
-    data.setdefault("hostname", body.hostname)
-    res.host_reports = [data]
-    for a in data.get("artifacts", []):
-        res.findings.append({
-            "rule_id": "P2S-HOST-001",
-            "rule_name": f"主机侧痕迹: {a.get('kind')}",
-            "severity": a.get("severity", "medium"),
-            "dimension": "host",
-            "cves": list(("CVE-2026-109618", "CVE-2026-109619")),
-            "ts": data.get("checked_at"),
-            "ip": data.get("hostname"),
-            "uri": a.get("path"),
-            "evidence": a.get("detail"),
-        })
-    _persist(res)
-    return {"ok": True, "scan_id": res.scan_id}
+
+#: 配置项的期望值（服务端统一判定，避免脚本版本差异导致结论不一致）
+# Agent 路由（/api/agent/*、主机报告归一化）已拆到 agent_api.py
+# 兼容再导出：测试与外部脚本历史上从 app 导入这两个归一化函数
+from .agent_api import (  # noqa: F401
+    _normalize_host_report,
+    _verdict_from_host_report,
+)
+from .agent_api import router as agent_router
+
+app.include_router(agent_router)
 
 
 # --------------------------------------------------------------------------
 # 任务中心（长耗时操作走后台队列，支持进度、取消、持久化）
 # --------------------------------------------------------------------------
-class JobIn(BaseModel):
-    kind: str                       # discover | logs | host | url
-    hosts: list[str] = []
-    cidr: str = ""
-    group: str = "default"
-    owner: str = ""
-    note: str = ""
-    timeout: float = 1.2
-    http_timeout: float = 8.0
-    quick: bool = False
-    save: bool = True
-    path: str = ""
-    url: str = ""
 
 
-def _resolve_hosts(hosts: list[str], cidr: str) -> list[str]:
-    out = [h.strip() for h in hosts if h and h.strip()]
-    if cidr:
-        out.extend(_expand_cidr(cidr))
-    return list(dict.fromkeys(out))
 
 
-def _run_discover(job, params: dict) -> dict:
-    hosts = _resolve_hosts(params.get("hosts", []), params.get("cidr", ""))
-    total = len(hosts)
-    job.total = total
-    results: list[dict] = []
-    for idx, host in enumerate(hosts, 1):
-        if job.cancel_requested:
-            break
-        job.message = f"正在检测 {host}（{idx}/{total}）"
-        prof = discovery.discover(
-            host,
-            timeout=params.get("timeout", 1.2),
-            http_timeout=params.get("http_timeout", 8.0),
-            deep=not params.get("quick", False),
-        )
-        rec = _asset_from_profile(
-            prof, params.get("group", "default"), params.get("owner", ""), params.get("note", "")
-        )
-        results.append(rec)
-        JOBS.progress(job.id, idx, total, f"{idx}/{total}  {host} → {prof.device_label}")
-    if params.get("save", True) and results:
-        with _lock:
-            assets = _load_assets()
-            by_host = {a["host"]: a for a in assets}
-            for rec in results:
-                # 离线 / 无有效协议响应的主机不写入台账，也不显示
-                if not rec.get("alive"):
-                    by_host.pop(rec["host"], None)
-                    continue
-                old = by_host.get(rec["host"])
-                if old:
-                    rec.update({
-                        "id": old.get("id", rec["id"]),
-                        "group": old.get("group", rec["group"]),
-                        "owner": old.get("owner", rec["owner"]),
-                    })
-                by_host[rec["host"]] = rec
-            _save_assets(list(by_host.values()))
-    online = [r for r in results if r.get("alive")]
-    offline = len(results) - len(online)
-    res = _new_scan("discover")
-    res.target_count = len(results)
-    res.assets = online
-    res.errors.append(f"扫描 {len(results)} 个目标，{len(online)} 个在线，{offline} 个无有效响应（已排除）")
-    _persist(res)
-    return {
-        "scan_id": res.scan_id,
-        "count": len(online),
-        "total": len(results),
-        "offline": offline,
-        "assets": online,
-    }
+#: 判定"资产发生变化"时比较的字段。
+#: 只认会改变结论的字段 —— product/device_label 只是文案（例如"捷普设备（证书域名）"这类
+#: 推断标签每次可能微调），把它们算作变化会让"变化"列全亮，失去信号价值。
 
 
-def _run_logs(job, params: dict) -> dict:
-    path = params.get("path", "")
-    job.message = f"正在解析 {path}"
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"日志文件不存在: {path}")
-    lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    job.total = len(lines) or 1
-    records = list(logscan.iter_records(lines))
-    JOBS.progress(job.id, len(lines), job.total, "规则匹配中")
-    fields: set[str] = set()
-    for r in records:
-        fields |= r.fields()
-    res = _new_scan("logs")
-    res.target_count = len(records)
-    res.coverage = coverage_report(fields)
-    res.coverage["parsed_records"] = len(records)
-    res.coverage["total_lines"] = len(lines)
-    res.findings = [f.to_dict() for f in logscan.scan_records(records)]
-    _persist(res)
-    return res.to_dict()
 
 
-def _run_host(job, params: dict) -> dict:
-    job.message = "正在检查 PHP 安装点与生效配置"
-    rep = hostcheck.run_host_check(deep=True)
-    res = _new_scan("host")
-    res.target_count = 1
-    res.host_reports = [rep.to_dict()]
-    for a in rep.artifacts:
-        res.findings.append({
-            "rule_id": "P2S-HOST-001",
-            "rule_name": f"主机侧痕迹: {a.get('kind')}",
-            "severity": a.get("severity", "medium"),
-            "dimension": "host",
-            "cves": list(("CVE-2026-109618", "CVE-2026-109619")),
-            "ts": rep.checked_at,
-            "ip": rep.hostname,
-            "uri": a.get("path"),
-            "evidence": a.get("detail"),
-        })
-    _persist(res)
-    return res.to_dict()
 
 
-def _run_url(job, params: dict) -> dict:
-    url = params.get("url", "")
-    if not url:
-        raise ValueError("缺少 url")
-    if not url.startswith("http"):
-        url = f"http://{url}"
-    job.message = f"正在探测 {url}"
-    res = _new_scan("url")
-    res.target_count = 1
-    asm = probe_mod.assess(url, timeout=15.0, do_probe=True)
-    res.assets.append(asm.to_dict())
-    _persist(res)
-    return res.to_dict()
 
 
-@app.post("/api/jobs")
-def api_create_job(body: JobIn) -> dict:
-    kind = body.kind
-    if kind == "discover":
-        hosts = _resolve_hosts(body.hosts, body.cidr)
-        if not hosts:
-            raise HTTPException(status_code=400, detail="请提供主机或网段")
-        if len(hosts) > 1024:
-            raise HTTPException(status_code=400, detail=f"目标过多（{len(hosts)} 台），上限 1024 台")
-        title = f"设备发现 · {len(hosts)} 台目标"
-        params = body.model_dump()
-        params["hosts"] = hosts
-        params["cidr"] = ""
-        total = len(hosts)
-    elif kind == "logs":
-        if not body.path:
-            raise HTTPException(status_code=400, detail="缺少日志路径")
-        title = f"日志分析 · {Path(body.path).name}"
-        params = body.model_dump()
-        total = 0
-    elif kind == "host":
-        title = "主机侧检测"
-        params = body.model_dump()
-        total = 0
-    elif kind == "url":
-        if not body.url:
-            raise HTTPException(status_code=400, detail="缺少 url")
-        title = f"URL 探测 · {body.url}"
-        params = body.model_dump()
-        total = 0
-    else:
-        raise HTTPException(status_code=400, detail=f"未知任务类型: {kind}")
-
-    runner = {"discover": _run_discover, "logs": _run_logs, "host": _run_host, "url": _run_url}[kind]
-    job = JOBS.submit(kind, title, runner, params, total)
-    return job.to_dict()
 
 
-@app.get("/api/jobs")
-def api_jobs(limit: int = 50) -> dict:
-    return {"jobs": [j.to_dict() for j in JOBS.list(limit)]}
 
 
-@app.get("/api/jobs/{job_id}")
-def api_job(job_id: str) -> dict:
-    job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    return job.to_dict()
 
 
-@app.post("/api/jobs/{job_id}/cancel")
-def api_job_cancel(job_id: str) -> dict:
-    ok = JOBS.cancel(job_id)
-    if not ok:
-        raise HTTPException(status_code=400, detail="任务不存在或已结束")
-    return {"ok": True, "job_id": job_id}
 
 
-@app.delete("/api/jobs/{job_id}")
-def api_job_delete(job_id: str) -> dict:
-    if not JOBS.delete(job_id):
-        raise HTTPException(status_code=400, detail="任务仍在执行，无法删除")
-    return {"ok": True}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # --------------------------------------------------------------------------
 # 日志文件上传（客户未必能访问服务器本地路径）
 # --------------------------------------------------------------------------
-@app.post("/api/scan/logs/upload")
-def api_upload_logs(file: UploadFile = File(...)) -> dict:  # noqa: B008
-    name = file.filename or "upload.log"
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", name)[-80:]
-    dest_dir = DATA_DIR / "uploads"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / f"{uuid.uuid4().hex[:8]}_{safe}"
-    data = file.file.read()
-    dest.write_bytes(data)
-    res = _new_scan("logs")
-    lines = dest.read_text(encoding="utf-8", errors="replace").splitlines()
-    records = list(logscan.iter_records(lines))
-    res.target_count = len(records)
-    fields: set[str] = set()
-    for r in records:
-        fields |= r.fields()
-    res.coverage = coverage_report(fields)
-    res.coverage["parsed_records"] = len(records)
-    res.coverage["total_lines"] = len(lines)
-    res.coverage["source_file"] = name
-    res.findings = [f.to_dict() for f in logscan.scan_records(records)]
-    _persist(res)
-    return res.to_dict()
 
 
 # --------------------------------------------------------------------------
 # 删除与导出
 # --------------------------------------------------------------------------
-@app.delete("/api/scans/{scan_id}")
-def api_delete_scan(scan_id: str) -> dict:
-    removed = []
-    for fmt in ("json", "md", "html"):
-        f = SCANS_DIR / f"{scan_id}.{fmt}"
-        if f.exists():
-            f.unlink()
-            removed.append(fmt)
-    if not removed:
-        raise HTTPException(status_code=404, detail="报告不存在")
-    return {"ok": True, "removed": removed}
 
 
 @app.get("/api/php-exposure/export")
-def api_php_export() -> str:
-    rows = api_php_exposure()["rows"]
-    out = ["host,device,php_version,sapi,fixed_release,status,exposure,risk,owner,group"]
-    for r in rows:
-        out.append(",".join(str(x).replace(",", " ") for x in [
+def api_php_export() -> Response:
+    rows: list[list[Any]] = [[
+        "host", "device", "php_version", "sapi", "fixed_release",
+        "status", "exposure", "risk", "owner", "group",
+    ]]
+    for r in api_php_exposure()["rows"]:
+        rows.append([
             r.get("host", ""), r.get("device_label", ""), r.get("php_version") or "",
             r.get("sapi") or "", r.get("fixed_release") or "", r.get("status", ""),
             r.get("exposure", ""), r.get("risk", ""), r.get("owner") or "", r.get("group") or "",
-        ]))
-    return "\n".join(out)
+        ])
+    return _csv_response(rows, "p2s-php-exposure.csv")
 
 
 @app.get("/api/host/export")
-def api_host_export() -> str:
+def api_host_export() -> Response:
     assets = _load_assets()
-    out = ["host,device_type,device_label,vendor,os_hint,php_present,php_version,sapi,exposure,risk,group,owner,note"]
+    rows: list[list[Any]] = [[
+        "host", "device_type", "device_label", "vendor", "os_hint", "php_present",
+        "php_version", "sapi", "exposure", "risk", "group", "owner", "note",
+    ]]
     for a in assets:
-        out.append(",".join(str(x).replace(",", " ") for x in [
+        rows.append([
             a.get("host", ""), a.get("device_type", ""), a.get("device_label", ""),
             a.get("vendor") or "", a.get("os_hint") or "", a.get("php_present"),
             a.get("php_version") or "", a.get("sapi") or "", a.get("exposure", ""),
             a.get("risk", ""), a.get("group") or "", a.get("owner") or "", a.get("note") or "",
-        ]))
-    return "\n".join(out)
-
-
-@app.get("/api/host/report")
-def api_host_report() -> dict:
-    """最近一次主机侧检测报告（用于导出）。"""
-    scans = []
-    if SCANS_DIR.exists():
-        for p in sorted(SCANS_DIR.glob("host-*.json")):
-            try:
-                scans.append(json.loads(p.read_text(encoding="utf-8")))
-            except json.JSONDecodeError:
-                continue
-    if not scans:
-        raise HTTPException(status_code=404, detail="还没有主机侧检测记录")
-    return scans[-1]
+        ])
+    return _csv_response(rows, "p2s-host-assets.csv")
 
 
 # --------------------------------------------------------------------------
@@ -888,3 +508,6 @@ def api_host_report() -> dict:
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> str:
     return DASHBOARD_HTML
+
+# 定时扫描调度（随进程启动，daemon 线程）
+start_scheduler()

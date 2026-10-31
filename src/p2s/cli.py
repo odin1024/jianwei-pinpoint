@@ -282,6 +282,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
             return 3
 
     print(f"p2s 控制台已启动: http://{args.host}:{port}", file=sys.stderr)
+    print("  首次访问需要输入口令（环境变量 P2S_CONSOLE_PASSWORD；未设置时启动日志里有随机口令）",
+          file=sys.stderr)
     print("按 Ctrl+C 退出", file=sys.stderr)
     uvicorn.run(app, host=args.host, port=port, log_level="info")
     return 0
@@ -348,10 +350,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("serve", help="启动 Web 控制台")
     sp.add_argument("--host", default="127.0.0.1")
-    sp.add_argument("--port", type=int, default=118080, help="默认 118080；被占用时自动顺延")
+    sp.add_argument("--port", type=int, default=18080, help="默认 18080；被占用时自动顺延")
     sp.add_argument("--no-fallback", action="store_true", help="端口被占用时直接报错，不自动顺延")
     sp.set_defaults(func=cmd_serve)
+
+    # 与 p2s-agent 等价：刚安装完还没重新生成 entry point 时也能跑
+    sp = sub.add_parser("agent", help="主机侧 Agent（等同 p2s-agent）")
+    sp.add_argument("agent_args", nargs=argparse.REMAINDER,
+                    help="透传给 Agent 的参数，例如 --console http://x:18080 --token xxx")
+    sp.set_defaults(func=cmd_agent)
     return p
+
+
+def cmd_agent(args: argparse.Namespace) -> int:
+    from .agent import agent as agent_mod
+
+    return agent_mod.main(list(args.agent_args))
 
 
 def _ensure_utf8_console() -> None:
@@ -365,6 +379,15 @@ def _ensure_utf8_console() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _ensure_utf8_console()
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    # `p2s agent --console ... --token ...` 直接转发给 Agent 自己的 argparse。
+    # 不能让外层 argparse 解析：`--console` 会被当成未知选项直接报错。
+    if argv and argv[0] == "agent":
+        from .agent import agent as agent_mod
+
+        return agent_mod.main(argv[1:])
+
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

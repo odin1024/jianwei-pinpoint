@@ -143,6 +143,11 @@ for _f in $INI_CANDS; do
   INI_FILES="$INI_FILES$_f|$_vals|
 "
 done
+# ---- FPM pool 级覆盖：pool.d 里的 php_admin_value 会盖过 php.ini ----
+# 故意只做一条 grep -H（带文件名前缀），解析放到 Python 侧，避免 shell 引号嵌套
+POOL_OVR=$(grep -HE '^[[:space:]]*php_(admin_)?value\\[[^]]+\\]' \
+  /etc/php/*/fpm/pool.d/*.conf /etc/php-fpm.d/*.conf 2>/dev/null || true)
+
 # ---- 加固包需要的元信息：php 路径 / ini 路径 / ini 的 sha256 ----
 PHP_BIN_FIRST="$FIRST"
 INI_FIRST=$("$FIRST" --ini 2>/dev/null | sed -n 's/^Loaded Configuration File: *//p' | head -1)
@@ -219,6 +224,7 @@ JSON="$JSON"'"php_bin":"'"$(jesc "$PHP_BIN_FIRST")'","ini_path":"'"$(jesc "$INI_
 JSON="$JSON"'"ini_sha256":"'"$INI_SHA"'",'
 JSON="$JSON"'"ini_candidates_raw":"'"$(jesc "$INI_CANDS")"'",'
 JSON="$JSON"'"ini_files_raw":"'"$(jesc "$INI_FILES")"'",'
+JSON="$JSON"'"pool_overrides_raw":"'"$(jesc "$POOL_OVR")"'",'
 JSON="$JSON"'"installs":['"$INSTALLS"'],"settings":['"$SETTINGS"'],"artifacts":['"$ARTIFACTS"']}}'
 
 if [ -n "$OUT" ]; then printf '%s' "$JSON" > "$OUT"; echo "已写入 $OUT"; fi

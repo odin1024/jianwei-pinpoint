@@ -29,7 +29,11 @@ from .signatures import PORT_SIGNATURES, SIGNATURES, TYPE_LABELS, Field, Sig, T
 
 @dataclass
 class Classification:
-    """设备分类结果。"""
+    """设备分类结果。
+
+    `vendor` 只能来自**产品级证据**（标题里的品牌名、厂商证书）；`mac_vendor`
+    是网卡 OUI 查出来的硬件厂商，两者语义不同，绝不互相覆盖。
+    """
 
     device_type: str = T.UNKNOWN
     device_label: str = TYPE_LABELS[T.UNKNOWN]
@@ -39,6 +43,9 @@ class Classification:
     evidence: list[str] = field(default_factory=list)
     candidates: list[dict] = field(default_factory=list)
     tech_stack: list[str] = field(default_factory=list)
+    #: 结论来自哪一级证据：title / cert / path / server / banner / port
+    vendor_source: str = ""
+    product_source: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -124,6 +131,74 @@ def detect_noise_ports(all_open_port_sets: list[list[int]]) -> set[int]:
     return {p for p, c in counter.items() if c / total > 0.3}
 
 
+def apply_noise_ports(profiles: list[Any]) -> set[int]:
+    """把跨主机统计出的噪声端口从每台设备的端口清单里剔除。
+
+    只在**批量扫描**时有意义：单台主机看不出"某个端口在整片网段都开着"。
+
+    判据（两者必须同时满足，且按"无响应端口"统计）：
+      1) 该端口在 >30% 的可达主机上都"开着但没有有意义的协议响应"；
+      2) 该端口在本机也没有有意义的协议响应。
+
+    关键在于只统计**无响应**的端口。早期版本直接统计"开着的端口"，结果在
+    一个同构的企业网段里，22/80/443 因为"很多设备都开"被判成噪声，
+    把真正的 Web 端口也剔掉了。
+    """
+    alive = [p for p in profiles if getattr(p, "alive", False)]
+    if not alive:
+        return set()
+
+    meaningless_sets: list[list[int]] = []
+    for p in alive:
+        meaningful = set(getattr(p, "meaningful_ports", []) or [])
+        meaningless_sets.append([port for port in p.open_ports if port not in meaningful])
+
+    noise = detect_noise_ports(meaningless_sets)
+    if not noise:
+        return noise
+
+    for p in alive:
+        meaningful = set(getattr(p, "meaningful_ports", []) or [])
+        removed = [port for port in p.open_ports if port in noise and port not in meaningful]
+        if not removed:
+            continue
+        p.open_ports = [port for port in p.open_ports if port not in removed]
+        p.noise_ports = sorted(set(p.noise_ports) | set(removed))
+        p.evidence.append(
+            "跨主机统计：端口 "
+            + "/".join(str(x) for x in removed)
+            + " 在超过 30% 的可达主机上都存在且无有效响应，判定为网络级噪声（NAT/tarpit），已从端口清单剔除"
+        )
+    return noise
+
+
+#: 证据分级（决定「谁能推出厂商」）
+#: T1 产品级：页面标题、TLS 证书、证书 CN、登录路径、认证域 —— 设备自己写明的身份
+#: T2 服务级：Server 头、协议 banner、Cookie、响应正文 —— 只说明"跑着什么软件"
+#: T3 推断级：端口画像、MAC OUI —— 只能作兜底，且必须显式标注
+TIER1_FIELDS = frozenset({Field.TITLE, Field.META, Field.BRAND, Field.CERT, Field.CERT_CN,
+                          Field.PATH, Field.WWW_AUTH})
+TIER2_FIELDS = frozenset({Field.SERVER, Field.BANNER, Field.COOKIE, Field.BODY})
+
+#: T2 证据的折算系数：服务级证据永远不能压过同权重的产品级证据
+TIER2_FACTOR = 0.7
+
+_FIELD_SOURCE = {
+    Field.TITLE: "title",
+    Field.META: "meta",
+    Field.JS: "js",
+    Field.BRAND: "brand",
+    Field.CERT: "cert",
+    Field.CERT_CN: "cert",
+    Field.PATH: "path",
+    Field.WWW_AUTH: "www_auth",
+    Field.SERVER: "server",
+    Field.BANNER: "banner",
+    Field.COOKIE: "cookie",
+    Field.BODY: "body",
+}
+
+
 def _cert_cn(subject: str) -> str:
     m = re.search(r"CN=([^,/]+)", subject or "")
     return m.group(1).strip() if m else ""
@@ -133,10 +208,15 @@ def classify(
     services: list[Any],
     open_ports: list[int],
     *,
+    meaningful_ports: Optional[list[int]] = None,
     mac: Optional[str] = None,
     mac_vendor: Optional[str] = None,
 ) -> Classification:
-    """综合多源证据给出设备分类。"""
+    """综合多源证据给出设备分类。
+
+    meaningful_ports：真正返回过有效协议响应的端口。端口画像兜底只用它 ——
+    否则一个 NAT/tarpit 网段里"连得上但零响应"的 25/110/143 会把设备推断成邮件网关。
+    """
     res = Classification()
     observations: list[tuple[str, str, Any]] = []
 
@@ -160,8 +240,15 @@ def classify(
             observations.append((Field.WWW_AUTH, svc.www_auth, svc))
         if getattr(svc, "matched_path", None):
             observations.append((Field.PATH, svc.matched_path, svc))
+        if getattr(svc, "js_hints", ""):
+            observations.append((Field.JS, svc.js_hints, svc))
+        if getattr(svc, "page_meta", None):
+            observations.append((Field.META, svc.page_meta, svc))
         if getattr(svc, "body_sample", None):
             observations.append((Field.BODY, svc.body_sample, svc))
+        # 品牌词（正文/静态资源/404 页扫出来的厂商名）：产品级证据
+        for brand in (getattr(svc, "brand_hints", None) or []):
+            observations.append((Field.BRAND, brand, svc))
 
     # ---- 签名匹配 ----
     scores: dict[tuple[str, str, str], float] = {}
@@ -181,19 +268,31 @@ def classify(
                 details.setdefault(key, []).append((sig, svc))
                 continue
             counted.add(ckey)
-            # 页面标题是最"人写的"产品标签，权重高于 Server 头和证书
-            w = sig.weight * (1.8 if sig.field == Field.TITLE else 1.0)
+            # 标题是最"人写的"产品标签；服务级证据（Server/banner/Cookie）打折，
+            # 避免「Server: jump」这类泛化标识压过「捷普WEB应用防火墙」这样的产品标题。
+            if sig.field == Field.TITLE:
+                factor = 1.8
+            elif sig.field in TIER2_FIELDS:
+                factor = TIER2_FACTOR
+            else:
+                factor = 1.0
+            w = sig.weight * factor
             # 同一产品取最高权重而不是累加 —— 否则 "ssh-2.0-openssh"(3.0) 与
             # "openssh"(2.5) 叠加成 5.5，会盖过更具体的 "ubuntu"(3.5)
             if w > scores.get(key, 0.0):
                 scores[key] = w
             details.setdefault(key, []).append((sig, svc))
 
-    # 互证加分：同一产品被**不同字段**（标题/证书/Server 头）同时命中，说明结论更可靠
+    # 互证加分：同一产品被**不同字段**同时命中，说明结论更可靠。
+    # 只有产品级字段之间才给满分互证；凑上服务级字段只算半份。
     for key, hits in details.items():
         fields_seen = {sig.field for sig, _ in hits}
         if len(fields_seen) > 1:
-            scores[key] = scores.get(key, 0.0) + 0.8 * (len(fields_seen) - 1)
+            tier1_seen = fields_seen & TIER1_FIELDS
+            bonus = 0.8 * (len(tier1_seen) - 1) if len(tier1_seen) > 1 else 0.0
+            if tier1_seen and (fields_seen - TIER1_FIELDS):
+                bonus += 0.4
+            scores[key] = scores.get(key, 0.0) + bonus
 
     # ---- 技术栈（与设备类型正交）----
     stack: set[str] = set()
@@ -225,22 +324,50 @@ def classify(
         res.device_label = TYPE_LABELS.get(dtype, dtype)
         res.vendor = vendor
         res.product = product
-        # 标题类签名（如"防火墙系统"）通常不带厂商，
-        # 若有更高分的候选带了厂商（品牌名提示），则继承该厂商
+
+        top_hits = details.get((dtype, vendor, product), [])
+        top_fields = {sig.field for sig, _ in top_hits}
+        # 最高分结论来自哪级证据：决定置信度上限与展示口径
+        from_tier1 = bool(top_fields & TIER1_FIELDS)
+        res.product_source = _FIELD_SOURCE.get(
+            next((s.field for s, _ in top_hits if s.field in TIER1_FIELDS),
+                 top_hits[0][0].field if top_hits else Field.TITLE), "")
+
+        # 厂商只认产品级证据：
+        #   1) 最高分结论自带厂商 → 用它；
+        #   2) 否则在**同类型**的 T1 命中里找厂商锚点（例如标题『捷普…』）；
+        #   3) 都没有就留空 —— 宁可写"未知"，也不拿 MAC OUI 冒充厂商。
         if not res.vendor:
-            for (_dt, vd, _pr), sc in ranked:
-                if vd and sc > 0:
-                    res.vendor = vd
-                    break
+            for (_dt, vd, _pr), _sc in ranked:
+                if vd and _dt == dtype:
+                    sig_hits = details.get((_dt, vd, _pr), [])
+                    if any(sig.field in TIER1_FIELDS for sig, _ in sig_hits):
+                        res.vendor = vd
+                        break
+        if res.vendor:
+            res.vendor_source = next(
+                (
+                    _FIELD_SOURCE.get(sig.field, "")
+                    for (sig, _) in top_hits
+                    if sig.vendor == res.vendor and sig.field in TIER1_FIELDS
+                ),
+                "",
+            ) or "candidate"
+
         total = sum(scores.values())
-        # 置信度：最高分占比 + 绝对强度
         strength = min(1.0, top / 8.0)
         dominance = top / total if total else 0
-        res.confidence = round(min(0.98, 0.35 + dominance * 0.35 + strength * 0.30), 2)
+        conf = 0.35 + dominance * 0.35 + strength * 0.30
+        if not from_tier1:
+            conf = min(conf, 0.72)   # 只靠 Server 头/banner 得出的结论，不许显得很确定
+        res.confidence = round(min(0.98, conf), 2)
         for (sig, svc) in details.get((dtype, vendor, product), []):
             src = {
                 Field.SERVER: "Server 头",
                 Field.TITLE: "页面标题",
+                Field.META: "页面元数据",
+                Field.JS: "静态资源文案",
+                Field.BRAND: "品牌词",
                 Field.CERT: "TLS 证书",
                 Field.CERT_CN: "证书 CN",
                 Field.BANNER: "服务 banner",
@@ -252,6 +379,9 @@ def classify(
             val = {
                 Field.SERVER: getattr(svc, "server", ""),
                 Field.TITLE: getattr(svc, "http_title", ""),
+                Field.META: getattr(svc, "page_meta", ""),
+                Field.JS: getattr(svc, "js_hints", ""),
+                Field.BRAND: "、".join(getattr(svc, "brand_hints", []) or []),
                 Field.CERT: getattr(svc, "tls_subject", ""),
                 Field.CERT_CN: _cert_cn(getattr(svc, "tls_subject", "") or ""),
                 Field.BANNER: getattr(svc, "banner", ""),
@@ -270,32 +400,68 @@ def classify(
                 })
     else:
         # ---- 端口画像兜底 ----
-        pset = set(open_ports)
+        # 只用「真的有过有效响应」的端口：NAT/tarpit 网段里 25/110/143 连得上但零响应，
+        # 拿它们推"邮件网关"会一路把不存在的设备写进台账。
+        responsive = [p for p in (meaningful_ports or [])]
+        # 少数端口的语义足够强，即使没有应用层响应也能定性：
+        # 9100/515/631 打印、554 RTSP、623 IPMI、2049/3260 存储。
+        # 它们不属于会被 NAT/tarpit 批量占用的端口，因此单独放行。
+        semantic = set(open_ports or []) & {9100, 515, 631, 554, 623, 2049, 3260}
+        pset = set(responsive) | semantic
         best = None
-        for pattern, dtype, vendor in PORT_SIGNATURES:
-            want = {int(x) for x in pattern.split(",")}
-            if want <= pset:
-                if best is None:
-                    best = (dtype, vendor)
+        if pset:
+            for pattern, dtype, vendor in PORT_SIGNATURES:
+                want = {int(x) for x in pattern.split(",")}
+                if want <= pset:
+                    if best is None:
+                        best = (dtype, vendor)
         if best:
-            res.device_type, res.vendor = best
+            res.device_type, port_vendor = best
             res.device_label = TYPE_LABELS.get(best[0], best[0])
-            res.product = TYPE_LABELS.get(best[0], best[0])
+            # 只能在没有任何产品标签时兜底，所以产品名必须标明是推断
+            res.product = f"{res.device_label}（端口推断）"
+            res.vendor = port_vendor or ""
+            res.vendor_source = "port" if port_vendor else ""
+            res.product_source = "port"
             res.confidence = 0.3
-            res.evidence.append(f"端口画像：{sorted(pset)} → 推断为 {res.device_label}")
+            res.evidence.append(
+                f"端口画像：{sorted(pset)} → 推断为 {res.device_label}"
+                f"（无标题/证书/Server 头等产品级证据，结论仅供参考）"
+            )
         else:
             res.device_type = T.UNKNOWN
             res.device_label = TYPE_LABELS[T.UNKNOWN]
             res.confidence = 0.1
-            res.evidence.append(
-                "未匹配到任何产品级特征（标题/Server 头/证书/登录路径），仅凭端口无法判断设备类型"
-            )
+            if pset:
+                res.evidence.append(
+                    f"未匹配到任何产品级特征（标题/证书/Server 头/登录路径）；"
+                    f"有效端口 {sorted(pset)} 也不足以判定类型"
+                )
+            else:
+                res.evidence.append(
+                    "未匹配到任何产品级特征，且没有端口产生有效协议响应 —— "
+                    "设备类型无法判定（不回退到端口猜测，避免把 NAT/tarpit 噪声当成设备特征）"
+                )
 
-    # ---- MAC / OUI 补充厂商 ----
+    # ---- MAC / OUI：只作"网卡厂商"，绝不冒充设备厂商 ----
     if mac:
         res.evidence.append(f"MAC 地址：{mac}")
-        if mac_vendor and not res.vendor:
-            res.vendor = mac_vendor
-            res.confidence = min(0.95, res.confidence + 0.15)
-
+        if mac_vendor:
+            res.evidence.append(
+                f"网卡厂商（OUI）：{mac_vendor}"
+                "（只说明网卡/整机代工厂，不代表设备品牌；设备品牌以上面的产品级证据为准）"
+            )
+    # JS 渲染设备：厂商已定时，用静态资源里的产品线词补全产品名（服务级证据）
+    _js = " ".join((getattr(s, "js_hints", "") or "") for s in (services or [])).strip()
+    if _js and res.vendor and res.product_source in ("port", "server", "banner", ""):
+        # 取**出现次数最多**的产品线词，而不是列表顺序（i18n 里 VPN 出现极多，易误选）
+        _cand = [w for w in ("安全感知平台", "信息审计", "准入控制", "运维审计",
+                             "管控平台", "管理平台", "防火墙", "SSL VPN", "SSLVPN", "VPN")
+                 if w.lower() in _js.lower()]
+        _word = max(_cand, key=lambda w: _js.lower().count(w.lower())) if _cand else ""
+        if _word:
+            res.product = f"{res.vendor}{_word}（静态资源）"
+            res.product_source = "js"
+            res.confidence = min(res.confidence, 0.72)
+            res.evidence.append(f"静态资源文案：出现「{_word}」→ 推断产品线（服务级证据，非产品级确认）")
     return res

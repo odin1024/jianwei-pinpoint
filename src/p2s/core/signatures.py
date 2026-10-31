@@ -16,6 +16,8 @@
 class Field:
     SERVER = "server"
     TITLE = "title"
+    #: 品牌词：从页面正文 / 静态资源内容 / 404 页里扫出来的厂商名
+    BRAND = "brand"
     CERT = "cert"
     CERT_CN = "cert_cn"
     BANNER = "banner"
@@ -23,10 +25,38 @@ class Field:
     WWW_AUTH = "www_auth"
     PATH = "path"
     BODY = "body"
+    #: 页面元数据（meta generator / application-name / og:site_name）
+    META = "meta"
     UA = "ua"
+    #: JS/CSS 静态资源里的产品线词（JS 渲染设备的兜底证据，服务级）
+    JS = "js"
+
+
+#: 品牌词典：页面正文、静态 JS/CSS、404 页里出现这些词，就足以确定厂商。
+#: 它是"标题为空"设备的主要兜底手段 —— 标题可以没有，品牌词几乎总在源码里。
+#:
+#: 纪律：纯 ASCII 别名必须**整词**命中（见 discovery._brand_hints 的边界匹配），
+#: 否则 "h3c" 会命中十六进制串、"edr" 会命中 hundred 这类单词。
+BRAND_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "捷普": ("捷普", "jiepu", "jump.net.cn", "yanfa.net.cn"),
+    "深信服": ("深信服", "sangfor"),
+    "Huawei": ("华为", "huawei", "quidway"),
+    "H3C": ("新华三", "h3c"),
+    "天融信": ("天融信", "topsec"),
+    "绿盟": ("绿盟", "nsfocus"),
+    "启明星辰": ("启明星辰", "venustech"),
+    "奇安信": ("奇安信", "qianxin"),
+    "安恒": ("安恒", "dbappsecurity"),
+    "Fortinet": ("fortinet", "fortigate"),
+    "Cisco": ("cisco",),
+    "Palo Alto": ("palo alto", "globalprotect"),
+    "SonicWall": ("sonicwall",),
+}
 
 
 class T:
+    #: Web 应用（CMS / 框架 / 面板）
+    WEBAPP = "webapp"
     BASTION = "bastion"
     WAF = "waf"
     NAC = "nac"
@@ -39,6 +69,7 @@ class T:
     IBMC = "ibmc"
     STORAGE = "storage"
     CAMERA = "camera"
+    PRINTER = "printer"
     MAIL = "mail"
     FTP = "ftp"
     DB = "database"
@@ -60,6 +91,8 @@ class T:
 
 
 TYPE_LABELS = {
+    T.PRINTER: "打印机 / 复合机",
+    "webapp": "Web 应用（PHP）",
     T.BASTION: "堡垒机 / 运维审计",
     T.WAF: "Web 应用防火墙",
     T.NAC: "准入控制系统",
@@ -116,33 +149,58 @@ def _s(field, needle, dtype, vendor="", product="", weight=3.0, note=""):
 
 
 SIGNATURES = (
-    # ===== JumpServer 生态（实测本机网段主力） =====
-    _s(Field.SERVER, "jump_server", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.SERVER, "jump-server", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.SERVER, "jump server", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.SERVER, "jumper", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.SERVER, "jump", T.BASTION, "JumpServer", "JumpServer 堡垒机", 2.5),
-    _s(Field.CERT, "o=jump", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.CERT, "ou=jump", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.CERT, "ou=yanfa", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.CERT, "jump company", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.CERT, "yanfa.net.cn", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.CERT, "jump.net.cn", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
-    _s(Field.TITLE, "堡垒机", T.BASTION, "JumpServer", "堡垒机", 4.5),
-    _s(Field.TITLE, "应用防火墙", T.WAF, "", "WEB 应用防火墙", 7.0,
-       "实测：标题为『捷普WEB应用防火墙』"),
-    # 品牌名只作厂商提示（权重低）；具体是什么产品由更细的标题关键词决定
-    _s(Field.TITLE, "捷普", T.APPLIANCE, "捷普", "捷普设备", 4.0,
-       "实测：192.168.1.225 标题『捷普WEB应用防火墙』"),
-    _s(Field.TITLE, "信息审计管理系统", T.BASTION, "", "信息审计管理系统", 7.0),
-    _s(Field.TITLE, "审计管理系统", T.BASTION, "", "审计管理系统", 7.0),
-    _s(Field.TITLE, "防火墙系统", T.FIREWALL, "", "防火墙系统", 7.0),
-    _s(Field.TITLE, "安全管理系统", T.NET_MGMT, "", "安全管理系统", 7.0),
-    _s(Field.TITLE, "准入控制系统", T.NAC, "JumpServer", "准入控制系统", 7.0),
-    _s(Field.TITLE, "准入测试系统", T.NAC, "JumpServer", "准入测试系统", 7.0),
+    # ===== 捷普（JUMP）安全设备系列 =====
+    #
+    # 这一组是本机网段实测出来的**同一个厂商**的产品族。关键教训（v0.5.1 修复）：
+    #   Server: Jump_server / Jumper / jump 是捷普自研 Web 服务的标识，
+    #   证书里 O=jump、ST=shan'xi、jump.net.cn / yanfa.net.cn 是捷普的内部 PKI，
+    #   这些**不是** FIT2CLOUD 的 JumpServer 开源堡垒机。
+    #   把它们映射成别家产品，是「用服务级证据去推厂商级结论」的典型错误。
+    # 因此：Server/CERT 里出现 jump，只能推出「捷普设备」，产品类型必须由标题决定。
+    _s(Field.TITLE, "捷普web应用防火墙", T.WAF, "捷普", "捷普 WEB 应用防火墙", 8.0),
+    _s(Field.TITLE, "捷普", T.APPLIANCE, "捷普", "捷普设备", 6.0,
+       "厂商锚点：标题里出现品牌名即可确定厂商，具体型号交给更细的标题关键词"),
+    _s(Field.TITLE, "信息审计管理系统", T.BASTION, "捷普", "捷普信息审计系统", 7.5),
+    _s(Field.TITLE, "审计管理系统", T.BASTION, "捷普", "捷普信息审计系统", 7.0),
+    _s(Field.TITLE, "捷普防火墙系统", T.FIREWALL, "捷普", "捷普防火墙", 7.5),
+    _s(Field.TITLE, "防火墙系统", T.FIREWALL, "", "防火墙系统", 6.0),
+    _s(Field.TITLE, "准入控制系统", T.NAC, "捷普", "捷普准入控制系统", 7.0),
+    _s(Field.TITLE, "准入测试系统", T.NAC, "捷普", "捷普准入测试系统", 7.0),
+    _s(Field.TITLE, "产品演示平台", T.APPLIANCE, "捷普", "捷普产品演示平台", 6.5),
+    _s(Field.SERVER, "jump", T.APPLIANCE, "捷普", "捷普设备（Web 服务标识 Jump_server）", 3.0,
+       "实测：捷普 WAF/防火墙/审计/准入的 Web 服务都返回 Jump_server / Jumper / jump"),
+    _s(Field.CERT, "jump.net.cn", T.APPLIANCE, "捷普", "捷普设备（证书域名）", 4.5),
+    _s(Field.CERT, "yanfa.net.cn", T.APPLIANCE, "捷普", "捷普设备（证书域名）", 4.0),
+    _s(Field.CERT, "st=shan'xi", T.APPLIANCE, "捷普", "捷普设备（证书属地 陕西）", 2.0),
+
+    # ===== JumpServer（FIT2CLOUD 开源堡垒机）真正的指纹 =====
+    # 只有厂商自报的名字才算数：Fit2Cloud 的证书、页面里的 jumpserver 品牌词。
+    _s(Field.TITLE, "jumpserver", T.BASTION, "JumpServer", "JumpServer 堡垒机", 8.0),
+    _s(Field.BODY, "jumpserver", T.BASTION, "JumpServer", "JumpServer 堡垒机", 5.0),
+    _s(Field.CERT, "fit2cloud", T.BASTION, "JumpServer", "JumpServer 堡垒机", 8.0),
+    _s(Field.CERT, "o=jumpserver", T.BASTION, "JumpServer", "JumpServer 堡垒机", 7.0),
+
+    # 捷普设备的管理口 SSH banner（实测 225/226/233 均为 SSH-2.0-JSH）
+    _s(Field.BANNER, "ssh-2.0-jsh", T.APPLIANCE, "捷普", "捷普设备（SSH 标识 JSH）", 3.5),
+
+    # ===== 品牌词（正文 / 静态资源 / 404 页）=====
+    # 只定厂商，不定型号：型号仍要标题或知识库；但"厂商正确"已经比"未识别"有用得多。
+    _s(Field.BRAND, "捷普", T.APPLIANCE, "捷普", "捷普设备（品牌词）", 5.0),
+    _s(Field.BRAND, "深信服", T.APPLIANCE, "深信服", "深信服设备", 5.0),
+    _s(Field.BRAND, "天融信", T.APPLIANCE, "天融信", "天融信设备", 5.0),
+    _s(Field.BRAND, "绿盟", T.APPLIANCE, "绿盟", "绿盟设备", 5.0),
+    _s(Field.BRAND, "启明星辰", T.APPLIANCE, "启明星辰", "启明星辰设备", 5.0),
+    _s(Field.BRAND, "奇安信", T.APPLIANCE, "奇安信", "奇安信设备", 5.0),
+    _s(Field.BRAND, "安恒", T.APPLIANCE, "安恒", "安恒设备", 5.0),
+    _s(Field.BRAND, "H3C", T.APPLIANCE, "H3C", "新华三设备", 5.0),
+    _s(Field.BRAND, "Fortinet", T.APPLIANCE, "Fortinet", "Fortinet 设备", 5.0),
+
+    # 类型词（不带厂商）：说明"这是什么设备"，不能推出厂商
+    _s(Field.TITLE, "堡垒机", T.BASTION, "", "堡垒机", 4.5),
+    _s(Field.TITLE, "应用防火墙", T.WAF, "", "WEB 应用防火墙", 6.0),
+    _s(Field.TITLE, "安全管理系统", T.NET_MGMT, "", "安全管理系统", 5.0),
     _s(Field.TITLE, "nac", T.NAC, "", "NAC 准入控制", 3.0),
     _s(Field.TITLE, "网络信息", T.NET_MGMT, "", "网络信息管理平台", 3.0),
-    _s(Field.PATH, "/login", T.BASTION, "JumpServer", "JumpServer 登录入口", 1.5),
 
     # ===== 华为 / H3C / 锐捷 =====
     _s(Field.TITLE, "ibmc", T.IBMC, "Huawei", "华为 iBMC 带外管理", 7.0, "实测：iBMC Login 页面"),
@@ -166,6 +224,7 @@ SIGNATURES = (
     _s(Field.TITLE, "sangfor", T.FIREWALL, "Sangfor", "深信服设备", 4.0),
     _s(Field.TITLE, "深信服", T.FIREWALL, "Sangfor", "深信服设备", 4.0),
     _s(Field.TITLE, "atrust", T.VPN, "Sangfor", "深信服 aTrust VPN", 5.0),
+    _s(Field.TITLE, "小米路由器", T.ROUTER, "Xiaomi", "小米路由器", 8.0),
     _s(Field.TITLE, "ikuai", T.ROUTER, "iKuai", "爱快路由", 5.0),
     _s(Field.TITLE, "爱快", T.ROUTER, "iKuai", "爱快路由", 5.0),
 
@@ -207,15 +266,17 @@ SIGNATURES = (
     _s(Field.TITLE, "uniview", T.CAMERA, "Uniview", "宇视科技", 5.0),
 
     # ===== Web / 应用平台 =====
-    _s(Field.SERVER, "microsoft-iis", T.DOTNET, "Microsoft", "Microsoft IIS", 5.0),
-    _s(Field.SERVER, "tomcat", T.JAVA, "Apache", "Apache Tomcat", 5.0),
-    _s(Field.SERVER, "jetty", T.JAVA, "Jetty", "Jetty", 5.0),
-    _s(Field.SERVER, "weblogic", T.JAVA, "Oracle", "WebLogic", 5.0),
-    _s(Field.SERVER, "openresty", T.WEB, "OpenResty", "OpenResty", 4.0),
-    _s(Field.SERVER, "litespeed", T.WEB, "LiteSpeed", "LiteSpeed", 4.0),
-    _s(Field.SERVER, "caddy", T.WEB, "Caddy", "Caddy", 4.0),
-    _s(Field.SERVER, "nginx", T.WEB, "nginx", "nginx", 3.0),
-    _s(Field.SERVER, "apache", T.WEB, "Apache", "Apache httpd", 3.0),
+    # 这些是**软件**，不是设备品牌：`Server: nginx` 只能说明"跑着 nginx"，
+    # 不能说明这台设备是"nginx 牌的"。设备厂商交给标题/证书这类产品级证据。
+    _s(Field.SERVER, "microsoft-iis", T.DOTNET, "", "Microsoft IIS", 5.0),
+    _s(Field.SERVER, "tomcat", T.JAVA, "", "Apache Tomcat", 5.0),
+    _s(Field.SERVER, "jetty", T.JAVA, "", "Jetty", 5.0),
+    _s(Field.SERVER, "weblogic", T.JAVA, "", "WebLogic", 5.0),
+    _s(Field.SERVER, "openresty", T.WEB, "", "OpenResty", 4.0),
+    _s(Field.SERVER, "litespeed", T.WEB, "", "LiteSpeed", 4.0),
+    _s(Field.SERVER, "caddy", T.WEB, "", "Caddy", 4.0),
+    _s(Field.SERVER, "nginx", T.WEB, "", "nginx", 3.0),
+    _s(Field.SERVER, "apache", T.WEB, "", "Apache httpd", 3.0),
     _s(Field.TITLE, "wordpress", T.CMS, "WordPress", "WordPress", 5.0),
     _s(Field.TITLE, "drupal", T.CMS, "Drupal", "Drupal", 5.0),
     _s(Field.TITLE, "joomla", T.CMS, "Joomla", "Joomla", 5.0),
@@ -276,6 +337,7 @@ SIGNATURES = (
 
 #: 端口画像（信号弱，仅在没有标签/证书特征时兜底）
 PORT_SIGNATURES = (
+    ("9100,515,631", T.PRINTER, "打印设备"),
     ("25,110,143", T.MAIL, ""),
     ("445", T.WINDOWS, "Windows"),
     ("3389", T.WINDOWS, "Windows"),
@@ -301,3 +363,76 @@ def find_signatures(field: str, value: str) -> list[Sig]:
         return []
     low = value.lower()
     return [s for s in SIGNATURES if s.field == field and s.needle in low]
+
+
+
+# ==========================================================================
+# 应用指纹（CMS / 框架 / 面板）
+#
+# 这类指纹的价值：把"这是 PHP 站点"升级为"这是 WordPress 6.2"，
+# 客户才知道该打哪个补丁、该查哪个插件。全部来自页面自报信息（generator/title/cookie/path），
+# 属产品级证据，不会被服务级标识冒充。
+# ==========================================================================
+
+APP_SIGNATURES: list[Sig] = [
+    # WordPress：generator 会写版本，cookie 有 wordpress_ 前缀
+    _s(Field.META, "wordpress", T.WEBAPP, "WordPress", "WordPress", 8.0),
+    _s(Field.BODY, "wp-content/", T.WEBAPP, "WordPress", "WordPress", 6.0),
+    _s(Field.COOKIE, "wordpress_", T.WEBAPP, "WordPress", "WordPress", 6.5),
+    _s(Field.TITLE, "wordpress", T.WEBAPP, "WordPress", "WordPress", 6.0),
+    # Discuz / 帝国 / 织梦
+    _s(Field.META, "discuz", T.WEBAPP, "Discuz!", "Discuz!", 8.0),
+    _s(Field.BODY, "discuz_uid", T.WEBAPP, "Discuz!", "Discuz!", 6.5),
+    _s(Field.META, "dedecms", T.WEBAPP, "DedeCMS", "DedeCMS", 8.0),
+    _s(Field.META, "empirecms", T.WEBAPP, "帝国CMS", "帝国CMS", 8.0),
+    # 框架
+    _s(Field.META, "thinkphp", T.WEBAPP, "ThinkPHP", "ThinkPHP", 8.0),
+    _s(Field.BODY, "thinkphp", T.WEBAPP, "ThinkPHP", "ThinkPHP", 6.0),
+    _s(Field.COOKIE, "laravel_session", T.WEBAPP, "Laravel", "Laravel", 7.0),
+    _s(Field.META, "laravel", T.WEBAPP, "Laravel", "Laravel", 7.5),
+    _s(Field.META, "yii", T.WEBAPP, "Yii", "Yii", 6.0),
+    _s(Field.COOKIE, "ci_session", T.WEBAPP, "CodeIgniter", "CodeIgniter", 6.0),
+    _s(Field.META, "symfony", T.WEBAPP, "Symfony", "Symfony", 7.5),
+    _s(Field.META, "drupal", T.WEBAPP, "Drupal", "Drupal", 8.0),
+    _s(Field.COOKIE, "drupal", T.WEBAPP, "Drupal", "Drupal", 6.5),
+    _s(Field.META, "joomla", T.WEBAPP, "Joomla", "Joomla", 8.0),
+    # 组件与面板
+    _s(Field.TITLE, "phpmyadmin", T.WEBAPP, "phpMyAdmin", "phpMyAdmin", 8.5),
+    _s(Field.COOKIE, "phpmyadmin", T.WEBAPP, "phpMyAdmin", "phpMyAdmin", 7.0),
+    _s(Field.TITLE, "adminer", T.WEBAPP, "Adminer", "Adminer", 8.0),
+    _s(Field.TITLE, "nextcloud", T.WEBAPP, "Nextcloud", "Nextcloud", 8.5),
+    _s(Field.TITLE, "宝塔", T.WEBAPP, "宝塔面板", "宝塔面板", 8.5),
+    _s(Field.META, "宝塔", T.WEBAPP, "宝塔面板", "宝塔面板", 8.0),
+    _s(Field.TITLE, "typecho", T.WEBAPP, "Typecho", "Typecho", 8.0),
+    _s(Field.TITLE, "zabbix", T.WEBAPP, "Zabbix", "Zabbix", 8.5),
+]
+
+# 合并应用指纹：按 (字段, 特征, 类型, 厂商, 产品) 去重，避免与已有签名重复
+def _merge_app_signatures(base, extra):
+    # 同 (字段, 特征) 只保留一条：测试与识别逻辑都要求 needle 唯一，
+    # 重复会让同一特征产生两个竞争结论。
+    seen = {(x.field, x.needle) for x in base}
+    out = list(base)
+    for sig in extra:
+        key = (sig.field, sig.needle)
+        if key not in seen:
+            seen.add(key)
+            out.append(sig)
+    return tuple(out)
+
+
+SIGNATURES = _merge_app_signatures(SIGNATURES, APP_SIGNATURES)
+
+# ==========================================================================
+# 扩展签名库（打印/存储/带外/虚拟化/DevOps/国产安全设备）
+# 放在文件末尾导入，避免与 signatures_extra 的循环导入问题。
+# ==========================================================================
+from .signatures_extra import (  # noqa: E402
+    EXTRA_LABELS,
+    EXTRA_PORT_SIGNATURES,
+    EXTRA_SIGNATURES,
+)
+
+SIGNATURES = _merge_app_signatures(SIGNATURES, EXTRA_SIGNATURES)
+PORT_SIGNATURES = tuple(PORT_SIGNATURES) + tuple(EXTRA_PORT_SIGNATURES)
+TYPE_LABELS.update(EXTRA_LABELS)

@@ -36,6 +36,7 @@ class ProbeResult:
     control_status: Optional[int] = None
     body_len: Optional[int] = None
     control_body_len: Optional[int] = None
+    payload_bytes: int = 0
     elapsed_ms: Optional[int] = None
     oom_signature: bool = False
     empty_500: bool = False
@@ -157,12 +158,26 @@ def _send(
         return None, None, f"{type(exc).__name__}: {exc}", None
 
 
+#: 探针名 → 策略。以前 "gentle"/"standard" 会落到 else 分支直接返回，
+#: 导致「主动探测」只发了一个控制请求、什么都没探测到（v0.5.0 的真实 bug）。
+PROBE_STRATEGY = {
+    "gentle": "header_amplification",
+    "standard": "header_amplification",
+    "header_amplification": "header_amplification",
+    "nested_arrays": "nested_arrays",
+}
+
+
 def probe_once(
     url: str, probe: str = "gentle", *, timeout: float = 20.0, verify_tls: bool = True
 ) -> ProbeResult:
-    """对单个 URL 执行一次差分探测。"""
+    """对单个 URL 执行一次差分探测：先发控制请求建基线，再发探针比差异。"""
     cfg = PROBE_SIZES.get(probe, PROBE_SIZES["gentle"])
     result = ProbeResult(url=url, probe=probe)
+    strategy = PROBE_STRATEGY.get(probe)
+    if strategy is None:
+        result.notes.append(f"未知探针类型 {probe!r}，跳过")
+        return result
 
     with httpx.Client(follow_redirects=False, timeout=timeout, verify=verify_tls) as client:
         cb = _boundary("ctl")
@@ -170,20 +185,18 @@ def probe_once(
         result.control_status = c_status
         result.control_body_len = c_len
 
-        if probe == "header_amplification":
+        if strategy == "header_amplification":
             b = _boundary("hdr")
             payload = build_header_amplification(b, cfg["headers"], cfg["header_size"])
-        elif probe == "nested_arrays":
+        else:
             b = _boundary("arr")
             payload = build_nested_arrays(b, cfg["array_depth"], cfg["array_width"])
-        else:
-            result.notes.append("未知探针类型，跳过")
-            return result
 
         status, blen, text, ms = _send(client, url, b, payload, timeout)
         result.status_code = status
         result.body_len = blen
         result.elapsed_ms = ms
+        result.payload_bytes = len(payload)
 
         if text and any(sig in text for sig in _OOM_RE):
             result.oom_signature = True

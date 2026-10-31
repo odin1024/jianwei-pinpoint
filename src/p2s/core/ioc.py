@@ -87,6 +87,9 @@ SUSPICIOUS_PROCESS_NAMES: tuple[str, ...] = (
     "crong3-agent",
 )
 
+#: 内置 IOC 数据的快照日期（非在线更新）
+IOC_SNAPSHOT = "2026-10-29"
+
 
 @dataclass
 class IocMatch:
@@ -120,7 +123,9 @@ class IocLibrary:
             "hashes": len(self.hashes),
             "user_agents": len(self.user_agents),
             "source": "TU Delft INTELLAB / NCSC-NL / CISA KEV",
-            "updated": "2026-10-29",
+            # 这是内置数据的**快照日期**，不是「最后更新时间」——
+            # 工具没有在线拉取能力，写成 updated 会让人误以为会自动刷新。
+            "snapshot": IOC_SNAPSHOT,
         }
 
     def match_text(self, text: str, *, context: str = "") -> list[IocMatch]:

@@ -50,11 +50,15 @@ def test_detect_network_noise_ports():
 
 
 # ---------- 分类：实测样本 ----------
-def test_jumpserver_by_server_header():
-    r = classify([_http(server="Jump_server", tls="CN=server,OU=yanfa,O=jump,C=CN")], [2000])
-    assert r.device_type == T.BASTION
-    assert r.vendor == "JumpServer"
-    assert r.confidence > 0.8
+def test_jiepu_server_header_is_not_jumpserver():
+    """实测 192.168.1.226：Server: Jump_server + 证书 O=jump 是**捷普**的 Web 服务，
+    不是 FIT2CLOUD 的 JumpServer。这条曾把 6 台捷普设备误判成 JumpServer 堡垒机。"""
+    r = classify([_http(server="Jump_server", tls="CN=server,OU=yanfa,O=jump,ST=shan'xi,C=CN")], [2000])
+    assert r.vendor == "捷普"
+    assert "捷普" in r.product
+    assert "JumpServer" not in (r.product or "")
+    # 只有服务级证据，置信度不许显得很确定
+    assert r.confidence <= 0.72
 
 
 def test_nac_title_beats_generic_server_header():
@@ -66,8 +70,38 @@ def test_nac_title_beats_generic_server_header():
     r = classify(svcs, [80, 443])
     assert r.device_type == T.NAC
     assert "准入" in r.product
-    # 次优候选应保留 JumpServer
-    assert any("JumpServer" in c["label"] for c in r.candidates)
+    assert r.vendor == "捷普"
+    assert r.product_source == "title"
+
+
+def test_jiepu_waf_title_wins_and_names_vendor():
+    """实测 192.168.1.225：标题『捷普WEB应用防火墙』+ Server: Jump_server。"""
+    svcs = [
+        _http(port=2000, server="Jump_server", title="捷普WEB应用防火墙",
+              tls="1.2.840.113549.1.9.1=jump@yanfa.net.cn,CN=server,OU=yanfa,O=jump,ST=shan'xi,C=CN"),
+    ]
+    r = classify(svcs, [22, 2000])
+    assert r.device_type == T.WAF
+    assert r.vendor == "捷普"
+    assert "应用防火墙" in r.product
+    assert r.confidence > 0.7
+
+
+def test_real_jumpserver_by_brand():
+    """真正的 JumpServer 靠厂商自报的名字（Fit2Cloud 证书 / jumpserver 品牌词）。"""
+    r = classify([_http(port=443, title="JumpServer", tls="CN=*.fit2cloud.com,O=Fit2Cloud,C=CN")], [443])
+    assert r.device_type == T.BASTION
+    assert r.vendor == "JumpServer"
+
+
+def test_oui_never_becomes_device_vendor():
+    """MAC OUI 只说明网卡厂商。实测 8c:1c:da 被 OUI 表标成 Sangfor，
+    但设备是捷普 —— 不能让 OUI 覆盖/冒充设备品牌。"""
+    r = classify([_http(port=443, tls="CN=server,O=company,C=CN")], [443],
+                 mac="8c1cda44ca4d", mac_vendor="深信服 Sangfor")
+    assert r.vendor != "深信服 Sangfor"
+    assert r.vendor == ""
+    assert any("网卡厂商" in e for e in r.evidence)
 
 
 def test_huawei_ibmc_by_title():
@@ -110,9 +144,25 @@ def test_generic_cert_is_not_a_vendor():
 
 
 def test_port_profile_fallback():
-    r = classify([], [6379])
+    """端口画像只在「端口真的有过有效响应」时才允许兜底。"""
+    r = classify([], [6379], meaningful_ports=[6379])
     assert r.device_type == T.DB
     assert r.confidence < 0.5
+    assert "端口推断" in r.product
+    assert r.product_source == "port"
+
+
+def test_no_port_guess_without_response():
+    """连得上但零响应的端口不能拿来猜设备类型（NAT/tarpit 会把 25/110/143 全判成邮件网关）。"""
+    r = classify([], [25, 110, 143], meaningful_ports=[])
+    assert r.device_type == T.UNKNOWN
+    assert r.confidence <= 0.2
+
+
+def test_tier2_only_conclusion_is_capped():
+    """只有 Server 头这种服务级证据时，置信度必须被压住。"""
+    r = classify([_http(port=80, server="nginx")], [80])
+    assert r.confidence <= 0.72
 
 
 def test_unknown_without_any_signal():

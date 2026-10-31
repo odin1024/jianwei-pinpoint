@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from . import binforensics
 from .ioc import IocLibrary, scan_webshell
 from .versions import classify
 
@@ -256,6 +257,27 @@ def _candidate_php_paths() -> list[str]:
     return out
 
 
+#: 补丁标志：修复版 PHP 引入了这个 ini 指令；未打补丁的构建里它不存在
+PATCH_FLAG_KEY = "memory_hard_limit_percent"
+
+
+def probe_patch_flag(exe: str) -> Optional[bool]:
+    """True=指令存在（补丁已在二进制里）；False=不存在；None=读不到。"""
+    rc, out = _run([
+        exe, "-r",
+        f'var_dump(ini_get("{PATCH_FLAG_KEY}"));',
+    ])
+    if rc != 0:
+        return None
+    low = (out or "").strip().lower()
+    if "bool(false)" in low:
+        return False
+    if low.startswith("string(") or "null" in low:
+        # string(0) "" —— 指令存在但值为空，同样说明补丁已编入
+        return True
+    return None
+
+
 def enumerate_php_installs() -> tuple[list[PhpInstall], list[str]]:
     """清点主机上的 PHP 安装点。"""
     installs: list[PhpInstall] = []
@@ -268,6 +290,35 @@ def enumerate_php_installs() -> tuple[list[PhpInstall], list[str]]:
             continue
         sapi = _php_sapi(path)
         v = classify(ver)
+        # M5 二进制取证：构建时间是不可伪造的证据（版本号可以改，编译时间改不了）
+        build = {}
+        try:
+            import os as _os
+            real = _os.path.realpath(path)
+            build = binforensics.probe_binary(real)
+            if not build.get("build_time") and build.get("kind") == "pe":
+                # Windows 的 php.exe 可能由包装器启动，再试同目录的 php.exe
+                build = binforensics.probe_binary(path)
+        except Exception:
+            build = {}
+        b_status, b_reason = binforensics.verdict(
+            ver, build.get("build_time"), bool(getattr(v, "changelog_hit", False)), [])
+        # 二进制证据比版本号更硬：它说"必然不含修复"时，采纳它
+        if b_status == "vulnerable" and v.status != "vulnerable":
+            v_status, v_reason = "vulnerable", b_reason
+        else:
+            v_status, v_reason = v.status, v.reason
+        # 运行时补丁标志（借鉴开源实现）：比版本号更接近"二进制里到底有没有修复"
+        patch_flag = probe_patch_flag(path)
+        if patch_flag is True and v_status != "patched":
+            v_status = "patched"
+            v_reason = (f"运行时补丁标志 {PATCH_FLAG_KEY} 存在 → 判定补丁已编入二进制"
+                        f"（原判定：{v_reason}）")
+        elif patch_flag is False and v_status == "patched":
+            v_status = "unknown"
+            v_reason = (f"版本/changelog 显示已修复，但运行时补丁标志 {PATCH_FLAG_KEY} 不存在，"
+                        f"两者矛盾 → 降级为无法确定，需人工核对")
+
         installs.append(
             PhpInstall(
                 path=path,
@@ -275,11 +326,22 @@ def enumerate_php_installs() -> tuple[list[PhpInstall], list[str]]:
                 sapi=sapi,
                 configured_path=_php_ini(path),
                 is_default=(default is not None and os.path.normcase(path) == os.path.normcase(default)),
-                verdict_status=v.status,
-                needs_action=v.needs_action,
-                reason=v.reason,
+                verdict_status=v_status,
+                needs_action=(v_status == "vulnerable"),
+                reason=v_reason + (f"｜二进制：{b_reason}" if build.get("kind") else ""),
             )
         )
+        try:
+            installs[-1].patch_flag = patch_flag
+        except Exception:
+            pass
+        if build.get("build_id") or build.get("build_time"):
+            try:
+                installs[-1].build_id = build.get("build_id")
+                installs[-1].build_time = build.get("build_time")
+                installs[-1].toolchain = build.get("toolchain")
+            except Exception:
+                pass
     if not installs:
         errors.append("未在本机发现可用的 PHP 安装")
     return installs, errors
@@ -485,6 +547,44 @@ def run_host_check(deep: bool = True) -> HostReport:
         checked_at=datetime.now().isoformat(timespec="seconds"),
     )
     installs, errors = enumerate_php_installs()
+
+    # 容器 / K8s 里的 PHP 在宿主机上不可见，单独清点后并入安装点列表。
+    # 任何异常都不能让主机检测整体失败 —— 宁可少报一类，也不能整份报告挂掉。
+    for _scanner, _label in (("scan_containers", "容器"), ("scan_kubernetes", "Kubernetes")):
+        try:
+            from . import containers as _c
+            _fn = getattr(_c, _scanner, None)
+            if _fn is None:
+                continue
+            _items, _notes = _fn()
+            errors.extend(_notes)
+            for _it in _items:
+                _d = _it.to_dict()
+                # 容器也要给真实结论：版本判定 + 补丁标志（与主机侧同一套规则）
+                _ver = _d.get("version") or "unknown"
+                _status, _reason = "unknown", "版本未知，无法判定"
+                if _ver != "unknown":
+                    _v = classify(_ver)
+                    _status, _reason = _v.status, _v.reason
+                _flag = _d.get("patch_flag")
+                if _flag is True and _status != "patched":
+                    _status = "patched"
+                    _reason = "容器内补齐丁标志 memory_hard_limit_percent 存在 → 补丁已编入"
+                elif _flag is False and _status == "patched":
+                    _status = "unknown"
+                    _reason = "版本显示已修复，但容器内无补丁标志，两者矛盾 → 需人工核对"
+                installs.append(PhpInstall(
+                    path=_d["path"],
+                    version=_ver,
+                    sapi=_d.get("sapi") or "",
+                    configured_path="",
+                    is_default=False,
+                    verdict_status=_status,
+                    needs_action=_status in ("vulnerable", "eol_unpatchable", "eol_backport_available"),
+                    reason=f"{_label} {_it.container}（镜像 {_it.image}）：{_reason}",
+                ))
+        except Exception as _e:
+            errors.append(f"{_label}清点失败：{_e}")
     rep.installs = installs
     rep.errors.extend(errors)
 
