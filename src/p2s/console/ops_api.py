@@ -151,6 +151,10 @@ def api_set_schedule(payload: dict) -> dict:
         cfg["hosts"] = [str(x).strip() for x in v if str(x).strip()][:1024]
     if "quick" in payload:
         cfg["quick"] = bool(payload["quick"])
+    if "save" in payload:                 # 结果是否写入资产台账（此前被忽略，导致定时扫描不入库）
+        cfg["save"] = bool(payload["save"])
+    if "group" in payload:
+        cfg["group"] = str(payload.get("group") or "auto")
     if not cfg.get("cidr") and not cfg.get("hosts"):
         raise HTTPException(status_code=400, detail="必须填写网段或主机列表")
     save_schedule(cfg)

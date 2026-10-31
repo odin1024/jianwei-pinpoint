@@ -51,44 +51,126 @@ async function loadAudit(c){
 /* ==================== 计划任务 ==================== */
 async function loadSchedule(c){
   const s=await api('/api/schedule');
+  let hist=[];
+  try{
+    const all=await api('/api/jobs?limit=60');
+    const list=Array.isArray(all)?all:(all&&all.jobs)||[];
+    hist=list
+      .filter(j=>['auto','自动'].includes((j.params||{}).group))
+      .slice(0,6);
+  }catch(e){ hist=[] }
   const next = s.enabled
     ? (s.next_run_in>0 ? Math.ceil(s.next_run_in/60)+' 分钟后' : '即将执行')
     : '未启用';
+  const stateTag = s.enabled ? tag('ok','已启用') : tag('mute','未启用');
+
   c.innerHTML=`
   <div class="page-narrow"><div class="page-head"><div><h2>计划任务</h2>
-
     <p>按固定间隔自动发起设备发现 · 与手动扫描走完全相同的任务路径</p></div></div>
   <div class="card">
-    <div class="card-h"><h3>定时扫描</h3><div class="sp"></div>
+    <div class="card-h"><h3>定时扫描</h3>${stateTag}<div class="sp"></div>
       <span class="muted" style="font-size:11.5px">下次执行：${esc(next)}</span></div>
     <div class="card-b">
-      <div class="row" style="margin-bottom:12px">
-        <label class="chk"><input type="checkbox" id="sc-on" ${s.enabled?'checked':''}> 启用定时扫描</label>
+      <div class="field" style="margin-bottom:12px">
+        <label class="check" for="sc-on">
+          <input type="checkbox" id="sc-on" ${s.enabled?'checked':''}>
+          <span>启用定时扫描（按间隔自动发起，结果入「自动」分组）</span>
+        </label>
       </div>
-      <div class="row" style="margin-bottom:12px">
-        <input id="sc-cidr" placeholder="网段 CIDR，例如 192.168.1.0/24" value="${esc(s.cidr||'')}">
-        <input id="sc-every" type="number" min="5" value="${esc(String(s.every_minutes||60))}" style="max-width:120px">
-        <span class="muted" style="font-size:12px">分钟/次（最小 5）</span>
-        <div class="sp"></div>
+
+      <div class="row" style="margin-bottom:14px">
+        <div class="field" style="flex:2 1 320px">
+          <label for="sc-cidr">扫描网段</label>
+          <input id="sc-cidr" placeholder="例如 192.168.1.0/24；也可以填单个 IP"
+                 value="${esc(s.cidr||'')}">
+        </div>
+        <div class="field" style="flex:0 0 150px">
+          <label for="sc-every">间隔（分钟）</label>
+          <input id="sc-every" type="number" min="5" max="10080"
+                 value="${esc(String(s.every_minutes||60))}">
+        </div>
         <button class="btn primary" id="sc-save">保存</button>
+        <button class="btn" id="sc-run" ${s.cidr||(s.hosts||[]).length?'':'disabled'}
+                title="用当前配置立刻跑一次，不影响定时计划">立即执行一次</button>
       </div>
+
+      <div class="field" style="margin-bottom:12px">
+        <label class="check" for="sc-save-db">
+          <input type="checkbox" id="sc-save-db" ${s.save!==false?'checked':''}>
+          <span>结果写入资产台账（关闭则只跑任务、不留资产画像）</span>
+        </label>
+      </div>
+
+      <div id="sc-err" class="hint" style="color:var(--danger);display:none;margin-bottom:8px"></div>
+
       <div class="hint">
-        上次执行：${s.last_run?esc(s.last_run.replace('T',' ')):'从未'} ·
-        上次任务：<span class="mono">${esc(s.last_job||'-')}</span><br>
-        定时任务按「自动」分组入库，可在任务中心查看进度与结果。
+        上次执行：${s.last_run?esc(s.last_run.replace('T',' ')):'从未'}
+        ${s.last_job?`· 任务 <span class="mono">${esc(s.last_job)}</span>`:''}<br>
+        定时任务按「自动」分组入库，可在任务中心查看进度与结果；间隔最小 5 分钟。
       </div>
     </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="card-h"><h3>最近自动扫描</h3><div class="sp"></div>
+      <span class="muted" style="font-size:11.5px">最多显示 6 条 · 完整历史见任务中心</span></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>任务</th><th>状态</th><th>结果</th><th>开始时间</th><th style="width:70px"></th></tr></thead>
+      <tbody>${hist.map(j=>`<tr>
+        <td class="mono" style="font-size:11.5px">${esc(j.title||j.id)}</td>
+        <td>${tag(j.state==='done'?'ok':(j.state==='failed'?'crit':'mute'),
+                  j.state==='done'?'已完成':(j.state==='failed'?'失败':'运行中'))}</td>
+        <td class="muted" style="font-size:11.5px">${esc((j.message||'').slice(0,40))}</td>
+        <td class="muted" style="font-size:11.5px">${esc(fmtTime(j.created_at))}</td>
+        <td><button class="btn ghost" data-job="${esc(j.id)}">查看</button></td>
+      </tr>`).join('')||`<tr><td colspan="5">${emptyState('clock','还没有自动扫描记录','启用定时任务或点「立即执行一次」后出现')}</td></tr>`}</tbody>
+    </table></div>
   </div>`;
+
+  c.querySelectorAll('[data-job]').forEach(b=>b.onclick=()=>go('tasks'));
+
+  const showErr=(m)=>{const e=$('#sc-err'); e.textContent=m; e.style.display=m?'block':'none'};
+  const validCidr=(v)=>{
+    if(!v) return '请填写网段或 IP';
+    if(!/^[0-9a-fA-F:.\/]+$/.test(v)) return '网段只允许数字、点、冒号与斜杠';
+    const m=v.match(/^(\d{1,3}(?:\.\d{1,3}){3})(?:\/(\d{1,2}))?$/);
+    if(m){
+      const ok=m[1].split('.').every(x=>Number(x)<=255);
+      if(!ok) return 'IPv4 每段必须在 0-255 之间';
+      if(m[2]!==undefined && Number(m[2])>32) return '掩码不能大于 /32';
+      return '';
+    }
+    return '';   // 交给后端判断（IPv6 / 主机名）
+  };
+
   $('#sc-save').onclick=async()=>{
+    const cidr=$('#sc-cidr').value.trim();
+    const err=validCidr(cidr);
+    if(err){ showErr(err); return }
+    showErr('');
     const btn=$('#sc-save'); btn.disabled=true;
     try{
       await api('/api/schedule',{method:'POST',body:{
         enabled:$('#sc-on').checked,
         every_minutes:parseInt($('#sc-every').value||'60',10),
-        cidr:$('#sc-cidr').value.trim(), quick:true, save:true}});
+        cidr, quick:true, save:$('#sc-save-db').checked, group:'auto'}});
       toast('已保存','ok'); loadSchedule($('#content'));
     }catch(e){toast('保存失败: '+e.message,'err')}
     finally{btn.disabled=false}
+  };
+
+  $('#sc-run').onclick=async()=>{
+    const cidr=$('#sc-cidr').value.trim();
+    const err=validCidr(cidr);
+    if(err){ showErr(err); return }
+    showErr('');
+    const btn=$('#sc-run'); btn.disabled=true; btn.textContent='已提交…';
+    try{
+      const r=await api('/api/jobs',{method:'POST',body:{
+        kind:'discover', hosts:[cidr], quick:true, save:true, group:'自动'}});
+      toast('已提交任务 '+(r.id||''),'ok');
+    }catch(e){toast('提交失败: '+e.message,'err')}
+    finally{btn.disabled=false; btn.textContent='立即执行一次'}
   };
 }
 
