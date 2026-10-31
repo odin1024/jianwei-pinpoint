@@ -1,0 +1,456 @@
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>见微 Pinpoint · 内网暴露面核查与取证</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI3IiBmaWxsPSIjMWQ0ZWQ4Ii8+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwwKSIgY29sb3I9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMi4xIj48cGF0aCBkPSJNNCAxMS41VjYuNUEyLjUgMi41IDAgMCAxIDYuNSA0aDUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjIuMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHBhdGggZD0iTTI4IDExLjVWNi41QTIuNSAyLjUgMCAwIDAgMjUuNSA0aC01IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxwYXRoIGQ9Ik00IDIwLjV2NUEyLjUgMi41IDAgMCAwIDYuNSAyOGg1IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxwYXRoIGQ9Ik0yOCAyMC41djVBMi41IDIuNSAwIDAgMSAyNS41IDI4aC01IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjMuNiIgZmlsbD0iY3VycmVudENvbG9yIi8+PC9nPjwvc3ZnPg==">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="见微 Pinpoint —— 企业内网 PHP 暴露面发现与合规评估工具">
+<style>/*__P2S_CSS__*/</style>
+</head>
+<body>
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+<symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-2"/><path d="M9 12h11m0 0-3-3m3 3-3 3"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12 18 6"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5M12 17.5h.01"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16M7 12h10"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".8"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3M20 5v6h-6"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8V4Z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 2.5 15 0 18M12 3c-2.5 2.5-2.5 15 0 18"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8.4 8 9.5 4.6-1.1 8-4.5 8-9.5V6l-8-3Z"/></symbol>
+  <symbol id="i-boxx" viewBox="0 0 24 24"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9Z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5M3 17l9 5 9-5" transform="translate(0,-1)"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
+  <symbol id="i-net" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="9" y="15" width="6" height="6" rx="1"/><path d="M6 9v3h12V9M12 12v3"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m9 8-5 4 5 4M15 8l5 4-5 4"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 9.5 4.3 4.3 0 0 1 17.5 18H7Z"/></symbol>
+  <symbol id="i-app" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></symbol>
+</svg>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"><svg width="26" height="26" viewBox="0 0 32 32" fill="none"><path d="M4 11.5V6.5A2.5 2.5 0 0 1 6.5 4h5" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2.2" stroke-linecap="round"/><path d="M28 11.5V6.5A2.5 2.5 0 0 0 25.5 4h-5" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2.2" stroke-linecap="round"/><path d="M4 20.5v5A2.5 2.5 0 0 0 6.5 28h5" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2.2" stroke-linecap="round"/><path d="M28 20.5v5A2.5 2.5 0 0 1 25.5 28h-5" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2.2" stroke-linecap="round"/><circle cx="11" cy="11" r="1.5" fill="currentColor" fill-opacity=".38"/><circle cx="21" cy="11" r="1.5" fill="currentColor" fill-opacity=".38"/><circle cx="11" cy="21" r="1.5" fill="currentColor" fill-opacity=".38"/><circle cx="21" cy="21" r="1.5" fill="currentColor" fill-opacity=".38"/><circle cx="16" cy="16" r="6.2" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-width="1.1"/><circle cx="16" cy="16" r="3.1" fill="currentColor"/></svg></div>
+      <div class="brand-txt"><b>见微 Pinpoint</b><span>内网暴露面核查与取证</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-group">总览</div>
+      <a href="#overview" data-tab="overview" class="on"><svg class="i"><use href="#i-grid"/></svg>态势总览</a>
+      <a href="#discover" data-tab="discover"><svg class="i"><use href="#i-radar"/></svg>设备发现</a>
+      <a href="#tasks" data-tab="tasks"><svg class="i"><use href="#i-clock"/></svg>任务中心<span class="cnt run hide" id="nav-run"></span></a>
+      <a href="#assets" data-tab="assets"><svg class="i"><use href="#i-list"/></svg>资产台账<span class="cnt hide" id="nav-assets"></span></a>
+      <div class="nav-group">暴露面</div>
+      <a href="#php" data-tab="php"><svg class="i"><use href="#i-alert"/></svg>PHP 暴露面<span class="cnt hide" id="nav-php"></span></a>
+      <a href="#logs" data-tab="logs"><svg class="i"><use href="#i-scan"/></svg>日志分析</a>
+      <a href="#agents" data-tab="agents"><svg class="i"><use href="#i-server"/></svg>Agent 管理</a>
+      <a href="#host" data-tab="host"><svg class="i"><use href="#i-server"/></svg>主机侧检测</a>
+      <div class="nav-group">能力</div>
+      <a href="#rules" data-tab="rules"><svg class="i"><use href="#i-filter"/></svg>规则中心</a>
+      <a href="#ioc" data-tab="ioc"><svg class="i"><use href="#i-target"/></svg>IOC 中心</a>
+      <a href="#remediation" data-tab="remediation"><svg class="i"><use href="#i-check"/></svg>整改跟踪</a>
+      <a href="#schedule" data-tab="schedule"><svg class="i"><use href="#i-clock"/></svg>计划任务</a>
+      <a href="#audit" data-tab="audit"><svg class="i"><use href="#i-list"/></svg>审计日志</a>
+      <a href="#reports" data-tab="reports"><svg class="i"><use href="#i-file"/></svg>报告中心</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pg-title">态势总览</h1>
+        <div class="sub" id="pg-sub"></div>
+      </div>
+      <div class="sp"></div>
+      <div class="top-actions">
+        <button class="icon-btn mobile-btn" id="btn-menu" title="菜单" aria-label="打开菜单">☰</button>
+        <button class="icon-btn" id="btn-alert" title="告警" aria-label="告警通知">
+          <svg class="i"><use href="#i-bell"/></svg><span class="badge hide" id="alert-badge">0</span>
+        </button>
+        <button class="icon-btn" id="btn-theme" title="切换深浅色" aria-label="切换深浅色"><svg class="i"><use href="#i-moon"/></svg></button>
+        <span class="v-sep" aria-hidden="true"></span>
+        <button class="btn" id="btn-refresh" title="重新加载当前页"><svg class="i s12"><use href="#i-refresh"/></svg>刷新</button>
+        <button class="btn ghost" id="btn-logout" title="退出登录"><svg class="i s12"><use href="#i-logout"/></svg>退出</button>
+      </div>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<div class="drawer-bg" id="drawer-bg"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-h"><h3 id="drawer-title">详情</h3><div class="sp"></div>
+    <button class="icon-btn" id="drawer-close" aria-label="关闭详情面板"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <div class="drawer-b" id="drawer-body"></div>
+  <div class="drawer-f" id="drawer-foot"></div>
+</aside>
+<div class="toast-wrap" id="toasts"></div>
+<script>/* ==================== 基础 ==================== */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ico=(n,cls='')=>`<svg class="i ${cls}"><use href="#i-${n}"/></svg>`;
+/* 相对时间：台账/报告里直接显示 ISO 串很难读，统一转成「3 分钟前」 */
+function fmtTime(iso){
+  if(!iso) return '-';
+  const t=Date.parse(iso.replace(' ','T'));
+  if(isNaN(t)) return esc(String(iso));
+  const d=Date.now()-t;
+  if(d<0) return esc(String(iso).slice(0,16).replace('T',' '));
+  const m=Math.floor(d/60000);
+  if(m<1) return '刚刚';
+  if(m<60) return m+' 分钟前';
+  const h=Math.floor(m/60);
+  if(h<24) return h+' 小时前';
+  const day=Math.floor(h/24);
+  if(day<30) return day+' 天前';
+  return esc(String(iso).slice(0,10));
+}
+/* jss：用于 onclick 等 JS 上下文。esc() 只做 HTML 实体转义，属性里的实体
+   会在 JS 执行前被还原，不能用来拼 JS 字符串；这里输出 JSON 字符串再把
+   双引号转成 &quot;，交给 HTML 解码后正好是合法的 JS 字面量。 */
+const jss=v=>JSON.stringify(String(v??''))
+  .replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'\\u003c');
+const api=async(u,o={})=>{
+  const opt={headers:{'Content-Type':'application/json'},...o};
+  if(o.body && !(o.body instanceof FormData)) opt.body=JSON.stringify(o.body);
+  const r=await fetch(u,opt);
+  if(r.status===401){location.href='/login';throw new Error('未登录或会话已过期')}
+  if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch(e){}throw new Error(m)}
+  return r.json()};
+/* 公共确认弹窗：返回 Promise<boolean>，支持 Esc 取消、键盘可达 */
+function askConfirm(opts={}){
+  return new Promise(resolve=>{
+    const bg=document.createElement('div'); bg.className='modal-bg';
+    const box=document.createElement('div'); box.className='modal';
+    box.setAttribute('role','dialog');
+    box.innerHTML=`<h3>${esc(opts.title||'请确认')}</h3>
+      <div class="mbody">${esc(opts.body||'')}</div>
+      <div class="mfoot">
+        <button class="btn" data-r="0">取消</button>
+        <button class="btn ${opts.danger?'danger':'primary'}" data-r="1">${esc(opts.okText||'确定')}</button>
+      </div>`;
+    document.body.append(bg,box);
+    requestAnimationFrame(()=>{bg.classList.add('on');box.classList.add('on');
+      box.querySelector('[data-r="1"]').focus()});
+    const done=v=>{document.removeEventListener('keydown',onKey);bg.remove();box.remove();resolve(v)};
+    const onKey=e=>{if(e.key==='Escape')done(false)};
+    document.addEventListener('keydown',onKey);
+    bg.onclick=()=>done(false);
+    box.querySelector('[data-r="0"]').onclick=()=>done(false);
+    box.querySelector('[data-r="1"]').onclick=()=>done(true);
+  });
+}
+/* 带「撤销」的提示：用于可逆的删除操作 */
+function toastAction(msg, actionText, onAction){
+  const t=document.createElement('div'); t.className='toast ok';
+  const s=document.createElement('span'); s.textContent=msg;
+  const b=document.createElement('button'); b.className='btn sm ghost'; b.textContent=actionText;
+  b.style.marginLeft='10px';
+  b.onclick=async()=>{t.remove(); try{await onAction()}catch(e){toast('撤销失败: '+e.message,'err')}};
+  t.append(s,b); $('#toasts').appendChild(t);
+  setTimeout(()=>{try{t.remove()}catch(e){}},9000);
+}
+/* 公共空状态：三个参数统一口径，避免每页各写一套 */
+function emptyState(icon,title,hint){
+  return `<div class="empty">${ico(icon)}<b>${esc(title)}</b>${hint?`<p>${esc(hint)}</p>`:''}</div>`;
+}
+function toast(msg,kind='info'){const t=document.createElement('div');t.className='toast '+kind;t.textContent=msg;
+  $('#toasts').appendChild(t);setTimeout(()=>{t.style.opacity=0;t.style.transition='.3s';setTimeout(()=>t.remove(),320)},3600)}
+
+const RISK={critical:['crit','严重'],high:['high','高危'],medium:['high','中危'],low:['ok','低危']};
+const EXP={exposed:['crit','暴露·需修复'],patched:['ok','已修复'],not_php:['mute','无 PHP'],unknown:['warn','待确认']};
+const JOBS={queued:['mute','排队中'],running:['info','执行中'],done:['ok','已完成'],
+            failed:['crit','失败'],cancelled:['mute','已取消']};
+const tag=(cls,txt)=>`<span class="tag ${cls}">${esc(txt)}</span>`;
+const DEV_ICON={firewall:'shield',bastion:'terminal',network_device:'net',mail_gateway:'mail',
+  linux_host:'terminal',windows_host:'app',web_server:'globe',php_app:'code',app_server:'layers',
+  cms:'file',db_tool:'db',monitoring:'grid',devops:'layers',file_service:'box',cloud:'cloud',
+  container:'boxx',iot_device:'target',appliance:'box',unknown:'box'};
+const SAPI_RISK={apache:'mod_php（风险最高）',fpm:'PHP-FPM',iis:'php-cgi',litespeed:'LiteSpeed',unknown:'未知 SAPI'};
+const KIND={discover:'设备发现',logs:'日志分析',host:'主机侧检测',url:'URL 探测',agent:'Agent 上报'};
+const JOB_STYLE={queued:'',running:'run',done:'ok',failed:'err',cancelled:'warn'};
+
+/* ==================== 主题 ==================== */
+const savedTheme=localStorage.getItem('p2s-theme')||'light';
+document.documentElement.dataset.theme=savedTheme;
+function syncThemeBtn(){const d=document.documentElement.dataset.theme==='dark';
+  $('#btn-theme').innerHTML=ico(d?'sun':'moon');
+  $('#btn-theme').title=d?'切换到浅色':'切换到深色'}
+$('#btn-theme').onclick=()=>{const n=document.documentElement.dataset.theme==='light'?'dark':'light';
+document.documentElement.dataset.theme=n;localStorage.setItem('p2s-theme',n);syncThemeBtn()};
+syncThemeBtn();
+
+/* ==================== 全局状态 & 路由 ==================== */
+const PAGES={
+  overview:{t:'态势总览',s:'CVE-2026-109618 / 109619 专项视图',fn:loadOverview},
+  discover:{t:'设备发现',s:'网段 / 批量主机 → 设备类型 → PHP 暴露面',fn:loadDiscover},
+  tasks:{t:'任务中心',s:'后台任务：进度、取消、历史',fn:loadTasks},
+  assets:{t:'资产台账',s:'设备画像持久化 · 分组 · 责任人',fn:loadAssets},
+  php:{t:'PHP 暴露面',s:'只关注真正跑 PHP 的资产',fn:loadPhp},
+  logs:{t:'日志分析',s:'被动检测 · 零风险',fn:loadLogs},
+  agents:{t:'Agent 管理',s:'已接入主机 · 上报时间 · 离线判定',fn:loadAgents},
+  host:{t:'主机侧检测',s:'本机配置 / 痕迹 / 进程 / 连接',fn:loadHost},
+  rules:{t:'规则中心',s:'检测规则 · 一键导出',fn:loadRules},
+  ioc:{t:'IOC 中心',s:'在野利用指标库',fn:loadIoc},
+  schedule:{t:'计划任务',s:'定时扫描 · 自动入库',fn:loadSchedule},
+  audit:{t:'审计日志',s:'所有写操作留痕',fn:loadAudit},
+  remediation:{t:'整改跟踪',s:'处置状态 · 责任人 · 复扫联动',fn:loadRemediation},
+  reports:{t:'报告中心',s:'历史扫描与交付报告',fn:loadReports},
+};
+const S={assets:[],jobs:[],timer:null};
+const STATE={overview:null};   // 侧栏摘要与概览共用，避免重复请求
+let _goSeq=0;                  // 页面切换序号：防止慢请求把新页面覆盖回旧内容
+
+/* ==================== 数据动效 ==================== */
+/* KPI / 统计数字滚动：只处理纯数字，带单位（%、台）的跳过，避免解析出错 */
+function animateCounts(root){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const nodes=[...(root||document).querySelectorAll('.kpi .v.num, .jstat b')];
+  nodes.forEach(el=>{
+    const raw=(el.textContent||'').trim();
+    if(!/^\d+$/.test(raw)) return;
+    const to=parseInt(raw,10); if(!to){return}
+    const t0=performance.now(), dur=540;   // 固定 540ms：0→2 这种小数字也要看得出来
+    const step=now=>{
+      const k=Math.min(1,(now-t0)/dur);
+      const e=1-Math.pow(1-k,3);              // easeOutCubic
+      el.textContent=String(Math.round(to*e));
+      if(k<1) requestAnimationFrame(step);
+    };
+    el.textContent='0';
+    requestAnimationFrame(step);
+  });
+}
+/* 条形图生长：从 0 过渡到目标宽度，逐条 30ms 延迟 */
+function animateBars(root){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const fills=[...(root||document).querySelectorAll('.bar-line .fill')];
+  fills.forEach((el,i)=>{
+    const target=el.style.width||'0%';
+    el.style.transition='none'; el.style.width='0%';
+    setTimeout(()=>{el.style.transition='width .64s cubic-bezier(.22,.61,.36,1)';
+      el.style.width=target;}, 45*i);
+  });
+}
+/* 卡片入场：切页时按顺序浮起（最容易被感知的一层） */
+function animateIn(root){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  // 不能截断：未被选中的元素会"直接可见"，出现"底部先出、顶部后到"的错乱（态势总览踩过）
+  const items=[...(root||document).querySelectorAll('.kpi, .card')];
+  items.forEach((el,i)=>{
+    const delay=Math.min(i,8)*32;      // 延迟封顶 8 档（≈256ms），避免最后一个等太久
+    el.style.opacity='0'; el.style.transform='translateY(8px)';
+    el.style.transition='opacity .26s ease, transform .26s cubic-bezier(.22,.61,.36,1)';
+    setTimeout(()=>{el.style.opacity='1';el.style.transform='none'}, delay);
+  });
+}
+/* 骨架屏：加载态用结构占位替代文字，感知更快 */
+function skeleton(rows=4){
+  const line=w=>`<div class="skl" style="width:${w};height:11px;margin:9px 0"></div>`;
+  return `<div class="card"><div class="card-b">
+    <div class="skl" style="width:38%;height:14px;margin-bottom:16px"></div>
+    ${Array.from({length:rows},(_,i)=>line([92,78,86,64][i%4]+'%')).join('')}
+  </div></div>`;
+}
+/* 按钮 loading：禁用并换成 spinner，保留宽度不跳动 */
+function setBusy(btn,on,label){
+  if(!btn) return;
+  if(on){
+    btn.dataset.w=btn.style.width; btn.style.minWidth=btn.offsetWidth+'px';
+    btn.dataset.txt=btn.textContent;
+    btn.innerHTML='<span class="spinner"></span>'+(label||'');
+    btn.disabled=true; btn.classList.add('busy');
+  }else{
+    btn.innerHTML=btn.dataset.txt||''; btn.disabled=false; btn.classList.remove('busy');
+    btn.style.minWidth='';
+  }
+}
+
+async function go(tab){
+  const p=PAGES[tab]; if(!p) return;
+  // 切页时收起所有浮层：否则告警弹层/抽屉会盖在新页面上，看起来像“卡住了”
+  try{ if(typeof closeAlerts==='function') closeAlerts();
+       if(typeof closeDrawer==='function') closeDrawer(); }catch(e){}
+  const seq=++_goSeq;
+  $('#pg-title').textContent=p.t; $('#pg-sub').textContent=p.s;
+  $$('.nav a').forEach(a=>a.classList.toggle('on',a.dataset.tab===tab));
+  // 每次渲染用一个全新的宿主节点：过期的渲染写进已脱离文档的旧节点，不会污染当前页
+  const host=document.createElement('div');
+  const c=$('#content'); c.replaceChildren(host);
+  // 切页淡入：只给新宿主加一次动画类，避免轮询刷新也触发
+  c.classList.remove('page-in'); void c.offsetWidth; c.classList.add('page-in');
+  host.innerHTML=skeleton();
+  loadAlerts();
+  try{await p.fn(host); if(seq===_goSeq){animateIn(host);animateCounts(host);animateBars(host)}}catch(e){ if(seq!==_goSeq) return;
+    host.innerHTML=emptyState('alert','加载失败',e.message)}
+}
+$$('.nav a').forEach(a=>a.onclick=e=>{e.preventDefault();location.hash=a.dataset.tab});
+$('#btn-refresh').onclick=()=>go(location.hash.slice(1)||'overview');
+$('#btn-logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
+$('#btn-menu').onclick=()=>$('.sidebar').classList.toggle('open');
+$$('.nav a').forEach(a=>a.addEventListener('click',()=>$('.sidebar').classList.remove('open')));
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'){e.preventDefault();$('.sidebar').classList.toggle('mini')}
+  if(e.key==='Escape')closeDrawer();
+});
+window.addEventListener('hashchange',()=>go(location.hash.slice(1)||'overview'));
+
+/* 任务轮询：任何页面都能看到运行中的任务 */
+async function pollJobs(){
+  // 标签页在后台时降到 10s 一次，避免无意义地反复拉取
+  if(document.hidden){ S.timer=setTimeout(pollJobs,10000); return; }
+  try{
+    const r=await api('/api/jobs');
+    const prev=S._jobStates||{};
+    const next={};
+    for(const j of (r.jobs||[])){
+      next[j.id]=j.state;
+      const was=prev[j.id];
+      if(was && (was==='running'||was==='queued') && (j.state==='done'||j.state==='failed')){
+        if(j.state==='done') toast('任务完成：'+(j.title||j.kind),'ok');
+        else toast('任务失败：'+(j.title||j.kind),'crit');
+      }
+    }
+    S._jobStates=next;
+    S.jobs=r.jobs||[];
+    const running=S.jobs.filter(j=>j.state==='running'||j.state==='queued').length;
+    const b=$('#nav-run');
+    b.classList.toggle('hide',!running); b.textContent=running;
+    b.classList.toggle('run',running>0);
+    const na=$('#nav-assets'); na.classList.toggle('hide',!S.assets.length); na.textContent=S.assets.length;
+    renderSideStat();
+    if(location.hash.slice(1)==='tasks' && $('#jobs-body')) renderJobs();
+    if(location.hash.slice(1)==='discover' && $('#d-jobs')){
+      const before = S.jobs.map(j=>j.id+':'+j.state).join(',');
+      renderDiscoverJobs();
+      if(before !== S._lastJobSig){ S._lastJobSig = before; refreshDiscoverResults(); }
+    }
+  }catch(e){}
+  S.timer=setTimeout(pollJobs,1500);
+}
+
+function renderSideStat(){
+  const el=$('#side-stat-body'); if(!el) return;
+  const o=STATE.overview; if(!o){el.textContent='—';return}
+  el.innerHTML = o.exposed>0
+    ? `<span class="r">${o.exposed} 台</span> 暴露待修复<br><span class="o">${o.unknown||0} 台</span> 版本待确认`
+    : (o.unknown>0 ? `<span class="o">${o.unknown} 台</span> 版本待确认<br>其余 ${o.not_php||0} 台无关`
+                    : `<span class="g">无暴露</span><br>${o.total_assets||0} 台已核查`);
+}
+
+/* ==================== 表格排序 ==================== */
+function makeSortable(tableId,rowSel,getVal){
+  const tbl=document.getElementById(tableId); if(!tbl) return;
+  tbl.querySelectorAll('th.sortable').forEach((th,i)=>{
+    th.onclick=()=>{
+      const dir=th.classList.contains('asc')?'desc':'asc';
+      tbl.querySelectorAll('th').forEach(x=>x.classList.remove('asc','desc'));
+      th.classList.add(dir);
+      const body=tbl.querySelector('tbody');
+      const rows=[...body.querySelectorAll(rowSel)];
+      rows.sort((a,b)=>{
+        const va=String(getVal(a,i)??''), vb=String(getVal(b,i)??'');
+        const na=parseFloat(va), nb=parseFloat(vb);
+        if(va!==''&&vb!==''&&!isNaN(na)&&!isNaN(nb)) return dir==='asc'?na-nb:nb-na;
+        return dir==='asc'?va.localeCompare(vb,'zh'):vb.localeCompare(va,'zh');
+      });
+      rows.forEach(r=>body.appendChild(r));
+    };
+  });
+}
+
+/*__P2S_PAGES__*/
+
+/* ==================== 告警收纳（右上铃铛） ==================== */
+let ALERTS=[];
+function buildAlerts(o){
+  const out=[];
+  if(o.exposed>0) out.push({lv:'crit',t:`${o.exposed} 台资产暴露于 CVE-2026-109618 / 109619`,
+    d:'PHP 版本低于修复基线，已被 CISA 列入 KEV，需立即处置',go:'php',btn:'查看清单'});
+  if(o.unknown>0) out.push({lv:'warn',t:`${o.unknown} 台版本待确认`,
+    d:'这些设备不暴露 PHP 版本号，需人工确认后判定',go:'php',btn:'去确认'});
+  if((o.config_issues||0)>0) out.push({lv:'warn',t:`${o.config_issues} 台主机配置不达标`,
+    d:'如 session.upload_progress 开启会放大该漏洞的利用面',go:'assets',btn:'看资产'});
+  if(!out.length) out.push({lv:'ok',t:'当前未发现告警',
+    d:`已核查 ${o.total_assets||0} 台资产，暴露面与配置均正常`,go:'',btn:''});
+  return out;
+}
+function renderAlerts(){
+  const unread=ALERTS.filter(a=>a.lv!=='ok').length;
+  const b=$('#alert-badge');
+  if(b){b.textContent=unread;b.classList.toggle('hide',unread===0)}
+  const btn=$('#btn-alert');
+  if(btn) btn.classList.toggle('has-crit',ALERTS.some(a=>a.lv==='crit'));
+  const sub=$('#alert-sub'); if(sub) sub.textContent=unread?`${unread} 项待关注`:'全部正常';
+  const list=$('#alert-list'); if(!list) return;
+  list.innerHTML=ALERTS.map(a=>`<div class="alert-item ${a.lv}">
+    ${ico(a.lv==='ok'?'check':'alert','s12')}
+    <div style="flex:1;min-width:0"><b style="font-size:12.5px">${esc(a.t)}</b>
+      <div class="muted" style="font-size:11.5px;margin-top:2px;line-height:1.55">${esc(a.d)}</div></div>
+    ${a.btn?`<button class="btn sm" onclick="location.hash='${a.go}';closeAlerts()">${esc(a.btn)}</button>`:''}
+  </div>`).join('');
+}
+async function loadAlerts(){
+  try{const o=await api('/api/overview'); ALERTS=buildAlerts(o); renderAlerts()}catch(e){}
+}
+function openAlerts(){const p=$('#alert-pop'),b=$('#alert-bg');
+  if(p)p.classList.remove('hide'); if(b)b.classList.remove('hide')}
+function closeAlerts(){const p=$('#alert-pop'),b=$('#alert-bg');
+  if(p)p.classList.add('hide'); if(b)b.classList.add('hide')}
+
+/* ==================== 启动 ==================== */
+/* 铃铛/弹层的 DOM 在 </body> 后段，脚本执行时可能尚未解析到 —— 全部加存在性判断，
+   否则一次 $() 取 null 就会中断整段启动逻辑（会表现为空白页） */
+/* 弹层交互统一走**事件委托**：节点被重渲染也不会失效。
+   覆盖：铃铛开关、✕ 关闭、点遮罩关闭、点弹层外关闭、Esc 关闭。 */
+const alertOpen=()=>{const p=$('#alert-pop');return !!(p&&!p.classList.contains('hide'))};
+document.addEventListener('click',e=>{
+  const t=e.target;
+  if(!(t instanceof Element)) return;
+  if(t.closest('#btn-alert')){ e.preventDefault(); alertOpen()?closeAlerts():openAlerts(); return }
+  if(t.closest('#alert-close')||t.closest('#alert-bg')){ e.preventDefault(); closeAlerts(); return }
+  // 点弹层以外的任何地方都收起（弹层还开着时）
+  if(alertOpen()&&!t.closest('#alert-pop')) closeAlerts();
+},true);
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'||e.key==='Esc'){ closeAlerts(); closeDrawer&&closeDrawer() }
+});
+loadAlerts();
+window.addEventListener('error',ev=>{
+  const c=$('#content');
+  if(c&&!c.querySelector('.card')) c.innerHTML=
+    '<div class="card"><div class="card-b"><div class="empty"><b>页面脚本出错</b><p>'+
+    esc(String(ev.message||'未知错误'))+'</p></div></div></div>';
+});
+pollJobs();
+go(location.hash.slice(1)||'overview');
+</script>
+<div class="pop-bg hide" id="alert-bg"></div>
+<div class="pop hide" id="alert-pop" role="dialog" aria-label="告警">
+  <div class="pop-h"><b>告警</b><span class="muted" style="font-size:11.5px" id="alert-sub"></span>
+    <div class="sp"></div><button class="icon-btn" id="alert-close" aria-label="关闭">✕</button></div>
+  <div class="pop-b" id="alert-list"></div>
+</div>
+</body>
+</html>
