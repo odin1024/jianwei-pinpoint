@@ -600,9 +600,78 @@ SYSTEMD2: tuple[Rule, ...] = (
          "改回 no"),
 )
 
+
+# ======================================================================
+# I. Kubernetes 工作负载加固
+# ======================================================================
+K8S: tuple[Rule, ...] = (
+    Rule("K8S-001", "K8s", "k8s", "pod-security.kubernetes.io/enforce", "privileged",
+         "restricted", "critical", False,
+         "命名空间级 Pod Security 档位。privileged 档位等于不设防，任何 Pod 都能以特权容器运行；"
+         "restricted 会强制非 root、禁提权、丢能力、要求 seccomp。",
+         "违规的既有工作负载会被 API Server 拒绝创建/更新，需先按补丁改造工作负载。",
+         "kubectl get ns <名称> -o jsonpath='{.metadata.labels}'",
+         "把标签改回 privileged（不推荐）"),
+    Rule("K8S-002", "K8s", "k8s", "securityContext.runAsNonRoot", "false", "true",
+         "critical", False,
+         "容器以 root 运行时，应用层 RCE 直接等于节点级 root 起点。设为 true 后镜像若声明 root 会启动失败。",
+         "镜像内进程需能写自身目录；部分老镜像以 root 写日志会失败。",
+         "kubectl get pod <名称> -o jsonpath='{.spec.securityContext.runAsNonRoot}'",
+         "移除该字段并重建 Pod"),
+    Rule("K8S-003", "K8s", "k8s", "securityContext.allowPrivilegeEscalation", "true", "false",
+         "high", False,
+         "允许进程通过 setuid/setgid 提权。关闭后可阻断大量容器逃逸手法。",
+         "需要 setuid 的工具（如部分包管理器）会失败。",
+         "同上，查 allowPrivilegeEscalation",
+         "移除该字段"),
+    Rule("K8S-004", "K8s", "k8s", "securityContext.readOnlyRootFilesystem", "false", "true",
+         "high", False,
+         "根文件系统只读，webshell 无法落盘、攻击者无法替换二进制。需配合 emptyDir 写临时文件。",
+         "应用若往镜像内写文件（缓存、上传）会失败，需挂载可写卷。",
+         "kubectl exec 进入容器后 touch /tmp/x 应失败（/tmp 若挂了空目录卷则正常）",
+         "改回 false"),
+    Rule("K8S-005", "K8s", "k8s", "securityContext.capabilities.drop", "[]", "ALL",
+         "high", False,
+         "默认容器带有 CHOWN/DAC_OVERRIDE/NET_RAW 等能力，是提权与网络嗅探的抓手。丢弃 ALL 后按需单独加回。",
+         "需要原始套接字或改文件属主的程序会失败。",
+         "kubectl get pod <名称> -o jsonpath='{.spec.containers[0].securityContext.capabilities}'",
+         "移除 drop 列表"),
+    Rule("K8S-006", "K8s", "k8s", "automountServiceAccountToken", "true", "false",
+         "medium", False,
+         "默认会把 ServiceAccount token 挂进容器，一旦代码执行即可用它对 API Server 发起请求。",
+         "需要访问 API Server 的控制器/Operator 必须显式开启。",
+         "kubectl exec 后 ls /var/run/secrets/kubernetes.io/serviceaccount 应不存在",
+         "改回 true"),
+    Rule("K8S-007", "K8s", "k8s", "seccompProfile.type", "Unconfined", "RuntimeDefault",
+         "medium", False,
+         "Unconfined 允许全部系统调用。RuntimeDefault 由容器运行时提供默认白名单，能拦住多数内核利用。",
+         "极少数依赖特殊 syscall 的程序会失败。",
+         "kubectl get pod <名称> -o jsonpath='{.spec.securityContext.seccompProfile}'",
+         "改回 Unconfined"),
+    Rule("K8S-008", "K8s", "k8s", "resources.limits.memory", None, "512Mi",
+         "medium", False,
+         "没有内存上限时，OOM 型攻击可以把整个节点拖垮（同节点其他 Pod 一起被驱逐）。",
+         "设置过低会让正常业务 OOMKilled，需按实际用量测算。",
+         "kubectl get pod <名称> -o jsonpath='{.spec.containers[0].resources.limits.memory}'",
+         "移除 limits"),
+    Rule("K8S-009", "K8s", "k8s", "NetworkPolicy", None, "default-deny + 放行 DNS",
+         "high", False,
+         "K8s 默认全通，Pod 之间可任意互访。默认拒绝策略能显著压缩横向移动范围。",
+         "未放行的依赖（数据库、缓存、外部 API）会连不通，需逐条补白名单。",
+         "kubectl get networkpolicy -n <命名空间>",
+         "删除该 NetworkPolicy"),
+    Rule("K8S-010", "K8s", "k8s", "hostNetwork / hostPID / hostIPC", "false", "false",
+         "high", False,
+         "开启任一 host* 都会让 Pod 与节点共享网络/进程/IPC 命名空间，逃逸门槛大幅降低。",
+         "需要抓包或监控节点的 DaemonSet 会用到，属于例外。",
+         "kubectl get pod <名称> -o jsonpath='{.spec.hostNetwork}{.spec.hostPID}'",
+         "改回 true（不推荐）"),
+)
+
 ALL: tuple[Rule, ...] = (SESSION + SESSION2 + EXPOSURE + DANGEROUS + DANGEROUS2
                          + RESOURCE + RESOURCE2 + LOGGING
-                         + FPM + FPM2 + WEBSERVER + WEBSERVER2 + SYSTEMD + SYSTEMD2)
+                         + FPM + FPM2 + WEBSERVER + WEBSERVER2 + SYSTEMD + SYSTEMD2
+                         + K8S)
 
 CATEGORIES: tuple[str, ...] = tuple(dict.fromkeys(r.category for r in ALL))
 

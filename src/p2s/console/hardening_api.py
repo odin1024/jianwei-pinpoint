@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from ..core import hardening as H
-from ..core import rulebook
+from ..core import k8s_harden, rulebook
 from .deps import (
     ADMIN_USER,
     DATA_DIR,
@@ -331,3 +331,40 @@ def api_hardening_rules(category: str = "", auto: bool | None = None) -> dict:
         "categories": list(rulebook.CATEGORIES),
         "rules": [r.to_dict() for r in rules],
     }
+
+
+@router.get("/api/hardening/k8s/{namespace}")
+def api_k8s_manifests(namespace: str) -> Response:
+    """生成 K8s 加固清单（zip）。平台不连集群、不执行 apply。"""
+    import re as _re
+
+    if not _re.fullmatch(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?", namespace):
+        raise HTTPException(status_code=400,
+                            detail="命名空间须符合 DNS-1123：小写字母/数字/连字符，≤63 字符")
+    arts = k8s_harden.build_all(namespace)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for a in arts:
+            z.writestr(a.name, a.content)
+        z.writestr("README.txt", _k8s_readme(namespace, arts))
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="p2s-k8s-{namespace}.zip"'})
+
+
+def _k8s_readme(ns: str, arts) -> str:
+    lines = [f"K8s 加固清单 · 命名空间 {ns}", "=" * 40, "",
+             "平台不会连接你的集群，也不执行任何 kubectl 命令。", ""]
+    for a in arts:
+        lines.append(f"- {a.name}：{a.note}")
+    lines += ["",
+              "执行顺序建议：",
+              "  1) kubectl apply -f namespace.yaml",
+              "  2) kubectl apply -f networkpolicy.yaml",
+              "  3) kubectl -n " + ns + " patch deployment <名称> --patch-file workload-patch.yaml",
+              "",
+              "注意：",
+              "  · restricted 档位会拒绝不合规的工作负载，请先在测试命名空间验证；",
+              "  · 默认拒绝的网络策略需要按业务补白名单，否则依赖会连不通；",
+              "  · readOnlyRootFilesystem 需要应用支持（写缓存请挂 emptyDir）。"]
+    return "\n".join(lines) + "\n"
