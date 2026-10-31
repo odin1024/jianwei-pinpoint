@@ -523,3 +523,15 @@ input[type=checkbox]{width:auto;accent-color:var(--accent)}
   #a-table th:nth-child(4), #a-table td:nth-child(4),
   #a-table th:nth-child(13), #a-table td:nth-child(13){display:none}
 }
+
+/* ==========================================================================
+   表单行对齐：同一 row 里"纯控件"（复选框/按钮）要和"带标签的字段"底边对齐
+   否则会出现：复选框居中、输入框在下面、按钮又偏下 —— 三者底边各不同
+   ========================================================================== */
+.row{align-items:flex-end}
+.row > .check{align-self:flex-end;height:32px;line-height:32px;margin-bottom:0}
+.row > .check input{height:15px;width:15px;margin:0}
+.row > .btn,.row > button.btn{align-self:flex-end}
+.row > .f150,.row > .f190,.row > .field{margin-bottom:0}
+.row > .field > label,.row > .f150 > label,.row > .f190 > label{margin-bottom:4px}
+.row > .spacer{flex:1}

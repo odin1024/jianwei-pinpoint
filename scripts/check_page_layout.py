@@ -94,6 +94,29 @@ NARROW_PROBE = r"""
 """
 
 
+FORM_ROW_PROBE = r"""
+(() => {
+  const rows = [...document.querySelectorAll('.row')]
+      .filter(r => r.querySelector('.check') || r.querySelector('.btn'));
+  const bad = [];
+  for (const row of rows) {
+    const kids = [...row.children].filter(el => el.offsetParent !== null);
+    if (kids.length < 2) continue;
+    const bottoms = kids.map(el => Math.round(el.getBoundingClientRect().bottom));
+    const spread = Math.max(...bottoms) - Math.min(...bottoms);
+    if (spread > 2) {
+      bad.push({
+        text: (row.textContent || '').trim().slice(0, 24),
+        spread: spread,
+        bottoms: bottoms
+      });
+    }
+  }
+  return JSON.stringify({rows: rows.length, misaligned: bad});
+})()
+"""
+
+
 def launch() -> subprocess.Popen:
     profile = pathlib.Path.home() / "AppData/Local/Temp/cdp-layout"
     return subprocess.Popen(
@@ -186,6 +209,16 @@ def main() -> int:
             fails.append(f"可见列={data['thVisible']}（应 <=11）")
         if data["cssRules"] < 300:
             fails.append(f"生效 CSS 规则={data['cssRules']}（应 >=300）")
+        # ---- 表单行：同一 row 内控件的底边必须对齐 ----
+        c.ev("""(()=>{const a=[...document.querySelectorAll('.nav a, aside a')]
+                .find(x=>x.textContent.includes('设备发现')); if(a)a.click(); return !!a})()""")
+        time.sleep(2.5)
+        fr = json.loads(c.ev(FORM_ROW_PROBE))
+        print("表单行:", json.dumps(fr, ensure_ascii=False))
+        if fr["misaligned"]:
+            for bad in fr["misaligned"][:3]:
+                fails.append(f"表单行底边错位 {bad['spread']}px：{bad['text']}")
+
         # ---- 窄屏：1200px 下不应出现横向溢出 ----
         c.call("Emulation.setDeviceMetricsOverride", width=1200, height=900,
                deviceScaleFactor=1, mobile=False)
