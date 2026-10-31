@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PHP 暴露面检测报告 · logs-893db093d8</title>
+<style>
+  :root{--ink:#111827;--ink2:#4b5563;--ink3:#6b7280;--line:#e5e7eb;--bg:#fff;--soft:#f9fafb;
+        --crit:#b42318;--high:#b54708;--mid:#a16207;--low:#067647;--accent:#1d4ed8}
+  *{box-sizing:border-box}
+  body{margin:0;background:#f3f4f6;color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .page{max-width:980px;margin:24px auto;background:var(--bg);padding:44px 52px 56px;
+        box-shadow:0 1px 3px rgba(16,24,40,.08),0 12px 32px -12px rgba(16,24,40,.16)}
+  header{border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:26px;
+         display:flex;align-items:flex-end;gap:16px}
+  header .t{flex:1}
+  h1{font-size:24px;margin:0 0 6px;letter-spacing:-.3px}
+  .meta{color:var(--ink3);font-size:12.5px;line-height:1.7}
+  .sev{font-size:12px;color:var(--ink2);border:1px solid var(--line);border-radius:6px;padding:8px 12px}
+  .sev b{font-size:18px;display:block;line-height:1.2}
+  h2{font-size:15px;margin:30px 0 12px;padding-left:10px;border-left:3px solid var(--accent);
+     line-height:1.2}
+  .kpis{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 6px}
+  .kpi{flex:1 1 120px;border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--soft)}
+  .kpi .k{font-size:11.5px;color:var(--ink3)}
+  .kpi .v{font-size:22px;font-weight:640;font-variant-numeric:tabular-nums;margin-top:2px}
+  .kpi.crit .v{color:var(--crit)} .kpi.ok .v{color:var(--low)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);
+     border-bottom:1px solid var(--line);padding:8px 10px;background:var(--soft)}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:nth-child(even) td{background:#fcfcfd}
+  .mono{font-family:ui-monospace,Consolas,monospace;font-size:11.5px}
+  .evi{color:var(--ink2);word-break:break-all;max-width:420px}
+  .empty{text-align:center;color:var(--ink3);padding:18px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;font-weight:600;
+       border:1px solid transparent;white-space:nowrap}
+  .tag.critical{color:var(--crit);background:#fdf2f1;border-color:#f5d3cf}
+  .tag.high{color:var(--high);background:#fdf6ec;border-color:#f2ddc0}
+  .tag.medium{color:var(--mid);background:#fdfaeb;border-color:#eee2b8}
+  .tag.low{color:var(--low);background:#eef8f2;border-color:#bfe3cd}
+  ol.adv{margin:6px 0 0 18px;padding:0;font-size:13px;line-height:1.85;color:var(--ink2)}
+  ol.adv li{margin-bottom:8px}
+  ol.adv code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
+              background:var(--soft);border:1px solid var(--line);border-radius:3px;padding:0 4px}
+  footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
+         color:var(--ink3);font-size:11.5px;line-height:1.8}
+  @media print{
+    body{background:#fff} .page{box-shadow:none;margin:0;padding:24px;max-width:none}
+    h2{break-after:avoid} tr{break-inside:avoid}
+  }
+</style></head>
+<body><div class="page">
+<header>
+  <div class="t">
+    <h1>PHP 暴露面检测报告</h1>
+    <div class="meta">
+      扫描编号 <span class="mono">logs-893db093d8</span> ·
+      类型 logs · 目标 10 个<br>
+      开始 2026-10-30T01:08:52 · 结束 2026-10-30T01:08:52
+    </div>
+  </div>
+  <div class="sev">风险等级<b>严重</b></div>
+</header>
+
+<h2>结论摘要</h2>
+<div class="kpis">
+  <div class="kpi crit"><div class="k">严重</div><div class="v">3</div></div>
+  <div class="kpi"><div class="k">高危</div><div class="v">2</div></div>
+  <div class="kpi"><div class="k">中危</div><div class="v">6</div></div>
+  <div class="kpi ok"><div class="k">低危</div><div class="v">4</div></div>
+</div>
+<div class="meta" style="margin-top:10px">
+  共评估 0 个 Web 资产，其中 <b>0</b> 个 PHP 版本低于修复基线。
+</div>
+
+<h2>Web 资产</h2>
+<table><thead><tr><th>目标</th><th>PHP 版本</th><th>SAPI</th><th>版本判定</th><th>风险</th></tr></thead>
+<tbody><tr><td colspan='5' class='empty'>本次未发现可评估的 Web 资产</td></tr></tbody></table>
+
+<h2>日志侧发现（16 条）</h2>
+<table><thead><tr><th>规则</th><th>名称</th><th>级别</th><th>来源</th><th>证据</th></tr></thead>
+<tbody><tr><td class='mono'>P2S-REQ-001</td><td>multipart 请求体含 PHP_SESSION_UPLOAD_PROGRESS</td><td><span class='tag critical'>严重</span></td><td class='mono'>198.51.100.77</td><td class='evi'>请求体命中 PHP_SESSION_UPLOAD_PROGRESS</td></tr><tr><td class='mono'>P2S-REQ-001</td><td>multipart 请求体含 PHP_SESSION_UPLOAD_PROGRESS</td><td><span class='tag critical'>严重</span></td><td class='mono'>198.51.100.78</td><td class='evi'>请求体命中 PHP_SESSION_UPLOAD_PROGRESS</td></tr><tr><td class='mono'>P2S-REQ-003</td><td>上传 filename 中含 PHP 代码</td><td><span class='tag critical'>严重</span></td><td class='mono'>198.51.100.77</td><td class='evi'>filename 含 PHP 代码: '[PHP-CODE-BLOCK len=28]'</td></tr><tr><td class='mono'>P2S-REQ-006</td><td>chunked 传输的 multipart POST</td><td><span class='tag high'>高危</span></td><td class='mono'>198.51.100.78</td><td class='evi'>Transfer-Encoding: chunked + multipart/form-data</td></tr><tr><td class='mono'>P2S-REQ-007</td><td>URL 参数中出现 session 文件路径</td><td><span class='tag high'>高危</span></td><td class='mono'>192.0.2.55</td><td class='evi'>URI 含会话文件路径: /page.php?page=/var/lib/php/session/sess_p2sopchain000</td></tr><tr><td class='mono'>P2S-REC-003</td><td>扫描器 User-Agent</td><td><span class='tag medium'>中危</span></td><td class='mono'>198.51.100.23</td><td class='evi'>扫描器 User-Agent: php2shell-scan/109618</td></tr><tr><td class='mono'>P2S-REC-003</td><td>扫描器 User-Agent</td><td><span class='tag medium'>中危</span></td><td class='mono'>198.51.100.23</td><td class='evi'>扫描器 User-Agent: php2shell-scan/109618</td></tr><tr><td class='mono'>P2S-REC-003</td><td>扫描器 User-Agent</td><td><span class='tag medium'>中危</span></td><td class='mono'>198.51.100.23</td><td class='evi'>扫描器 User-Agent: php2shell-scan/109618</td></tr><tr><td class='mono'>P2S-REC-003</td><td>扫描器 User-Agent</td><td><span class='tag medium'>中危</span></td><td class='mono'>198.51.100.23</td><td class='evi'>扫描器 User-Agent: php2shell-scan/109618</td></tr><tr><td class='mono'>P2S-REC-003</td><td>扫描器 User-Agent</td><td><span class='tag medium'>中危</span></td><td class='mono'>198.51.100.77</td><td class='evi'>扫描器 User-Agent: p2srun/1.0</td></tr><tr><td class='mono'>P2S-REC-003</td><td>扫描器 User-Agent</td><td><span class='tag medium'>中危</span></td><td class='mono'>198.51.100.78</td><td class='evi'>扫描器 User-Agent: p2srun/1.0</td></tr><tr><td class='mono'>P2S-REC-001</td><td>高频 upload_progress 探测</td><td><span class='tag low'>低危</span></td><td class='mono'>198.51.100.23</td><td class='evi'>同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）</td></tr><tr><td class='mono'>P2S-REC-001</td><td>高频 upload_progress 探测</td><td><span class='tag low'>低危</span></td><td class='mono'>198.51.100.23</td><td class='evi'>同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）</td></tr><tr><td class='mono'>P2S-REC-001</td><td>高频 upload_progress 探测</td><td><span class='tag low'>低危</span></td><td class='mono'>198.51.100.23</td><td class='evi'>同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）</td></tr><tr><td class='mono'>P2S-REC-001</td><td>高频 upload_progress 探测</td><td><span class='tag low'>低危</span></td><td class='mono'>198.51.100.23</td><td class='evi'>同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）</td></tr><tr><td class='mono'>P2S-REC-002</td><td>响应头暴露易受攻击的 PHP 版本</td><td><span class='tag info'>info</span></td><td class='mono'>198.51.100.79</td><td class='evi'>横幅暴露 8.4.26 -&gt; vulnerable</td></tr></tbody></table>
+
+<h2>整改建议</h2>
+<ol class="adv"><li>本次未发现低于修复基线的 PHP 资产；建议保持定期复扫，持续覆盖新增资产。</li><li>确认 <code>session.upload_progress.enabled=0</code> 等缓解配置在目标主机上生效（需在目标机执行 Agent 采集脚本核实，远程无法判断）。</li></ol>
+
+<footer>
+  本报告基于远程探测与本地采集的事实生成，结论区分「确认受影响 / 无法判定」两类；
+  未标注为确认的条目需结合目标主机实际情况复核。<br>
+  生成时间 2026-10-30T01:08:52 · 由见微 Pinpoint 生成
+</footer>
+</div></body></html>

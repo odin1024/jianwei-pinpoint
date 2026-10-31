@@ -1,7 +1,8 @@
 # p2s 交付给客户的私有化部署编排
 #
-#   docker compose up -d          启动控制台
-#   浏览器打开 http://<host>:18080
+#   export P2S_CONSOLE_PASSWORD='换成你自己的口令'
+#   docker compose up -d
+#   浏览器打开 http://127.0.0.1:18080
 #
 # 数据落在 p2s_data 卷里（资产台账 + 扫描报告）。
 
@@ -10,13 +11,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: p2s-console:0.1.0
+    image: p2s-console:0.21.0
     container_name: p2s-console
     restart: unless-stopped
     ports:
-      - "18080:18080"
+      # 默认只发布到回环地址：需要让同事访问时再改成 "18080:18080"，
+      # 并务必设置 P2S_CONSOLE_PASSWORD。
+      - "127.0.0.1:18080:18080"
     environment:
       P2S_DATA_DIR: /app/data
+      # 为空时控制台会随机生成口令并打印到容器日志（docker compose logs console）
+      P2S_CONSOLE_PASSWORD: "${P2S_CONSOLE_PASSWORD:-}"
       TZ: Asia/Shanghai
     volumes:
       - p2s_data:/app/data

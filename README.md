@@ -123,13 +123,11 @@
 
 ## 2. 快速开始（本地开发）
 
-### 2.1 建目录 + 初始化
+### 2.1 初始化（已有 .venv 可跳过）
 
 ```powershell
-# 1) 建项目目录
-$root = "C:\Users\<用户名>\Documents\Codex\2026-10-29\zui\php2shell-sentinel"
-New-Item -ItemType Directory -Force -Path $root | Out-Null
-Set-Location $root
+# 1) 进入项目目录（仓库根目录下的 app/）
+Set-Location app
 
 # 2) 建虚拟环境
 python -m venv .venv
@@ -139,8 +137,9 @@ python -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -e ".[all]"
 
-# 4) 验证
+# 4) 验证：113 个用例 + 静态检查
 python -m pytest
+python -m ruff check src tests scripts
 python -m p2s.cli rules
 ```
 
@@ -155,15 +154,20 @@ python -m p2s.cli logs --file examples\access.log.sample --report reports\
 # 主机侧检测
 python -m p2s.cli host --report reports\
 
-# Web 控制台
+# Web 控制台（首次访问需要口令）
+$env:P2S_CONSOLE_PASSWORD = "换成你的口令"
 python -m p2s.cli serve --port 18080
-# 浏览器打开 http://127.0.0.1:18080
+# 浏览器打开 http://127.0.0.1:18080 → 跳转登录页 → 输入口令
 ```
+
+> 未设置 `P2S_CONSOLE_PASSWORD` 时，控制台会随机生成一个口令并打印在启动日志里，
+> 每次重启都会变；正式部署请显式设置该环境变量。
+> Agent 上报用的令牌是 `P2S_AGENT_TOKEN`（缺省复用控制台口令）。
 
 **后台常驻启动（Windows）**
 
 ```powershell
-.\scripts\start-console.ps1                 # 默认 18080，自动检测端口占用
+.\scripts\start-console.ps1                 # 默认 18080，自带健康检查与「已运行」识别
 .\scripts\start-console.ps1 -Port 19000     # 指定端口
 .\scripts\stop-console.ps1                  # 停止
 ```

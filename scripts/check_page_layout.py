@@ -1,0 +1,218 @@
+"""页面布局门禁：用 CDP 量真实 DOM，断言关键区块没有"样式静默失效"。
+
+起因：CSS 少一个 `}` 导致 44% 规则失效——表格行高 107px、操作列竖排、顶栏按钮掉出视口，
+而 ruff / node --check / HTML 配平 全部通过。只有量计算样式才能发现。
+"""
+from __future__ import annotations
+
+import json
+import pathlib
+import subprocess
+import sys
+import time
+import urllib.request
+
+import websocket
+
+PORT = 9346
+BASE = "http://127.0.0.1:18080"
+CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+
+ASSETS_PROBE = r"""
+(() => {
+  const q = s => document.querySelector(s);
+  const cs = e => e ? getComputedStyle(e) : null;
+  const out = {};
+  const ta = q('.top-actions');
+  out.topActionsDisplay = ta ? cs(ta).display : 'MISSING';
+  out.topActionsTop = ta ? Math.round(ta.getBoundingClientRect().top) : -999;
+  const row = q('#a-table tbody tr');
+  out.rowHeight = row ? row.offsetHeight : -1;
+  const act = q('#a-table .act-row');
+  out.actDisplay = act ? cs(act).display : 'MISSING';
+  out.thVisible = [...document.querySelectorAll('#a-table thead th')]
+      .filter(t => t.offsetParent !== null).length;
+  out.cssRules = (() => { let n=0; for (const s of document.styleSheets){
+      try{ n += s.cssRules.length }catch(e){} } return n; })();
+  return JSON.stringify(out);
+})()
+"""
+
+OVERVIEW_PROBE = r"""
+(() => {
+  const q = s => document.querySelector(s);
+  const cs = e => e ? getComputedStyle(e) : null;
+  const kpi = q('.kpi');
+  const v = q('.kpi .v');
+  const body = getComputedStyle(document.body);
+  const parse = c => (c.match(/\d+/g) || [0,0,0]).slice(0,3).map(Number);
+  const lum = c => { const [r,g,b] = parse(c).map(x => {
+      x /= 255; return x <= .03928 ? x/12.92 : Math.pow((x+.055)/1.055, 2.4); });
+      return .2126*r + .7152*g + .0722*b; };
+  const ratio = (a,b) => { const l1=lum(a), l2=lum(b);
+      return ((Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05)).toFixed(2); };
+  const bg = body.backgroundColor;
+  const out = {
+    kpiDisplay: kpi ? cs(kpi).display : 'MISSING',
+    bodyBg: bg,
+    kpiValueColor: v ? cs(v).color : 'MISSING',
+    contrast: v ? ratio(cs(v).color, bg) : '0',
+    mutedContrast: (() => {
+      const m = q('.muted');
+      return m ? ratio(cs(m).color, bg) : '0';
+    })(),
+    theme: document.documentElement.dataset.theme || 'light',
+  };
+  return JSON.stringify(out);
+})()
+"""
+
+
+NARROW_PROBE = r"""
+(() => {
+  const de = document.documentElement;
+  const out = {
+    scrollW: de.scrollWidth, clientW: de.clientWidth,
+    overflow: de.scrollWidth - de.clientWidth,
+    tableOverflow: 0, worst: ''
+  };
+  for (const t of document.querySelectorAll('table')) {
+    const w = t.parentElement ? t.parentElement.scrollWidth - t.parentElement.clientWidth : 0;
+    if (w > out.tableOverflow) { out.tableOverflow = w; }
+  }
+  let worstEl = null, worstW = 0;
+  for (const el of document.querySelectorAll('body *')) {
+    const r = el.getBoundingClientRect();
+    if (r.right > de.clientWidth + 2 && r.width < de.clientWidth * 2) {
+      if (r.right - de.clientWidth > worstW) { worstW = r.right - de.clientWidth; worstEl = el; }
+    }
+  }
+  out.worst = worstEl ? (worstEl.tagName + '.' + (worstEl.className||'').toString().split(' ')[0]
+                        + ' +' + Math.round(worstW) + 'px') : '';
+  return JSON.stringify(out);
+})()
+"""
+
+
+def launch() -> subprocess.Popen:
+    profile = pathlib.Path.home() / "AppData/Local/Temp/cdp-layout"
+    return subprocess.Popen(
+        [CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+         "--force-device-scale-factor=1", "--window-size=1600,1000",
+         "--no-first-run", "--no-default-browser-check",
+         f"--remote-debugging-port={PORT}", f"--user-data-dir={profile}",
+         "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def ws_url() -> str:
+    for _ in range(40):
+        try:
+            for t in json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/list")):
+                if t.get("type") == "page":
+                    return t["webSocketDebuggerUrl"]
+        except Exception:
+            time.sleep(0.5)
+    raise RuntimeError("Chrome 未就绪")
+
+
+class C:
+    def __init__(self, url: str) -> None:
+        self.ws = websocket.create_connection(url, timeout=30)
+        self.i = 0
+
+    def call(self, m: str, **p):
+        self.i += 1
+        self.ws.send(json.dumps({"id": self.i, "method": m, "params": p}))
+        while True:
+            msg = json.loads(self.ws.recv())
+            if msg.get("id") == self.i:
+                return msg.get("result", {})
+
+    def ev(self, expr: str, await_promise: bool = False):
+        r = self.call("Runtime.evaluate", expression=expr, returnByValue=True,
+                      awaitPromise=await_promise)
+        return r.get("result", {}).get("value")
+
+
+def main() -> int:
+    proc = launch()
+    fails: list[str] = []
+    try:
+        c = C(ws_url())
+        c.call("Page.enable")
+        c.call("Runtime.enable")
+        c.call("Page.navigate", url=BASE)
+        time.sleep(3)
+        c.ev(f"""fetch('{BASE}/api/login',{{method:'POST',
+             headers:{{'Content-Type':'application/json'}},
+             body:JSON.stringify({{username:'admin',password:'admin@123'}})}}).then(r=>r.status)""", True)
+        c.call("Page.navigate", url=BASE)
+        time.sleep(3)
+
+        # ---- 总览页：KPI 与对比度（浅色）----
+        ov = json.loads(c.ev(OVERVIEW_PROBE))
+        print("总览(浅):", json.dumps(ov, ensure_ascii=False))
+        if ov["kpiDisplay"] == "MISSING":
+            fails.append("总览页 KPI 卡片缺失")
+        if float(ov["contrast"]) < 4.5:
+            fails.append(f"KPI 数值对比度 {ov['contrast']} < 4.5")
+
+        # ---- 深色模式：正文与次要文字都要可读 ----
+        c.ev("document.documentElement.dataset.theme='dark'")
+        time.sleep(1)
+        dk = json.loads(c.ev(OVERVIEW_PROBE))
+        print("总览(深):", json.dumps(dk, ensure_ascii=False))
+        if float(dk["contrast"]) < 4.5:
+            fails.append(f"深色模式 KPI 对比度 {dk['contrast']} < 4.5")
+        if float(dk["mutedContrast"]) < 3.0:
+            fails.append(f"深色模式次要文字对比度 {dk['mutedContrast']} < 3.0")
+        c.ev("document.documentElement.dataset.theme='light'")
+
+        # ---- 资产页：表格与顶栏 ----
+        c.ev("""(()=>{const a=[...document.querySelectorAll('.nav a, aside a')]
+                .find(x=>x.textContent.includes('资产台账')); if(a)a.click(); return !!a})()""")
+        time.sleep(3)
+        data = json.loads(c.ev(ASSETS_PROBE))
+        print("资产页:", json.dumps(data, ensure_ascii=False))
+        if data["topActionsDisplay"] != "flex":
+            fails.append(f"顶栏操作区 display={data['topActionsDisplay']}（应 flex）")
+        if data["topActionsTop"] < 0:
+            fails.append(f"顶栏操作区 top={data['topActionsTop']}（应 >=0）")
+        if not (0 < data["rowHeight"] <= 70):
+            fails.append(f"表格行高={data['rowHeight']}px（应 <=70）")
+        if data["actDisplay"] != "flex":
+            fails.append(f"操作列 display={data['actDisplay']}（应 flex）")
+        if data["thVisible"] > 11:
+            fails.append(f"可见列={data['thVisible']}（应 <=11）")
+        if data["cssRules"] < 300:
+            fails.append(f"生效 CSS 规则={data['cssRules']}（应 >=300）")
+        # ---- 窄屏：1200px 下不应出现横向溢出 ----
+        c.call("Emulation.setDeviceMetricsOverride", width=1200, height=900,
+               deviceScaleFactor=1, mobile=False)
+        time.sleep(2)
+        nar = json.loads(c.ev(NARROW_PROBE))
+        print("资产页(1200px):", json.dumps(nar, ensure_ascii=False))
+        if nar["overflow"] > 8:
+            fails.append(f"1200px 下页面横向溢出 {nar['overflow']}px（{nar['worst']}）")
+
+        c.ev("""(()=>{const a=[...document.querySelectorAll('.nav a, aside a')]
+                .find(x=>x.textContent.includes('报告中心')); if(a)a.click(); return !!a})()""")
+        time.sleep(2.5)
+        nar2 = json.loads(c.ev(NARROW_PROBE))
+        print("报告中心(1200px):", json.dumps(nar2, ensure_ascii=False))
+        if nar2["overflow"] > 8:
+            fails.append(f"报告中心 1200px 横向溢出 {nar2['overflow']}px（{nar2['worst']}）")
+    finally:
+        proc.terminate()
+
+    if fails:
+        print("\n[FAIL] 布局检查未通过：")
+        for f in fails:
+            print("   -", f)
+        return 1
+    print("\n[OK] 布局 + 对比度检查通过")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

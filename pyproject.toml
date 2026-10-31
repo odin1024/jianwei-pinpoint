@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "p2s"
-version = "0.1.0"
+version = "0.21.0"
 description = "php2shell (CVE-2026-109618 / CVE-2026-109619) detection & exposure assessment toolkit"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,26 +12,39 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "p2s contributors" }]
 keywords = ["php", "security", "cve-2026-109618", "cve-2026-109619", "php2shell", "vulnerability-detection"]
 
+# 核心只依赖 httpx：规则库是 Python 数据、报告是字符串模板，
+# 之前声明的 pyyaml / jinja2 在 src 里一次都没 import 过。
 dependencies = [
     "httpx>=0.24,<1",
-    "pyyaml>=6",
-    "jinja2>=3",
 ]
 
 [project.optional-dependencies]
-console = ["fastapi>=0.110", "uvicorn>=0.27", "jinja2>=3", "pydantic>=2"]
-agent  = ["httpx>=0.24"]
-dev    = ["pytest>=7.4", "ruff>=0.4"]
-all    = ["fastapi>=0.110", "uvicorn>=0.27", "jinja2>=3", "pydantic>=2", "pytest>=7.4", "ruff>=0.4"]
+console = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "pydantic>=2",
+    "python-multipart>=0.0.9",   # UploadFile 解析依赖，缺了上传接口直接 500
+]
+agent = ["httpx>=0.24"]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+all = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "pydantic>=2",
+    "python-multipart>=0.0.9",
+    "pytest>=7.4",
+    "ruff>=0.4",
+]
 
 [project.scripts]
 p2s = "p2s.cli:main"
+p2s-agent = "p2s.agent.agent:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools.package-data]
-p2s = ["rules/*.yaml", "data/*.json"]
+# 说明：仓库里没有 src/p2s/rules 与 src/p2s/data 目录，规则以 Python 数据形式
+# 内置于 core/rules.py，因此不再声明 package-data（原来的声明是空配置）。
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -50,3 +63,11 @@ ignore = [
     "UP007",
     "UP045",
 ]
+
+# app.py 用 `from .deps import *` 复用共享底座（拆分层的一部分）。
+# 星号导入无法静态解析名字，F405 只在该文件豁免；其余文件仍严格检查。
+[tool.ruff.lint.per-file-ignores]
+"src/p2s/console/app.py" = ["F405", "E402"]
+"src/p2s/console/agent_api.py" = ["F405"]
+"src/p2s/console/assets_api.py" = ["F405"]
+"src/p2s/console/scan_api.py" = ["F405", "E402"]

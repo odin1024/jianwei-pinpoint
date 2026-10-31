@@ -22,7 +22,9 @@ async function openAsset(host){
           ${x.favicon?`<div class="mono muted" style="font-size:11px">sha256 ${esc(x.favicon.slice(0,32))}…</div>`:''}</dd>
         <dt>有效端口</dt><dd class="num">${(x.meaningful_ports||[]).join(', ')||'-'}</dd>
         <dt>噪声端口</dt><dd class="num muted">${(x.noise_ports||[]).join(', ')||'-'}</dd>
-        <dt>PHP</dt><dd>${x.php_version?'<b>PHP '+esc(x.php_version)+'</b>':(x.php_present?'存在但版本未知':'未检测到')}</dd>
+        <dt>PHP</dt><dd>${x.php_version?'<b>PHP '+esc(x.php_version)+'</b>':(x.php_present?'存在但版本未知':'未检测到')}
+        ${(x.php_instances||[]).length>1?`<div class="muted" style="font-size:11px;margin-top:3px;line-height:1.7">按最差版本判定，共 ${x.php_instances.length} 个实例：<br>
+          ${(x.php_instances||[]).slice().sort((a,b)=>a.port-b.port).map(i=>esc(':'+i.port+' → '+(i.version||'未知'))).join('，')}</div>`:''}</dd>
         <dt>SAPI</dt><dd>${x.sapi?esc(SAPI_RISK[x.sapi]||x.sapi):'-'}</dd>
         <dt>开放端口</dt><dd><div class="ports">${(x.open_ports||[]).map(p=>`<span class="port">${p}</span>`).join('')||'-'}</div></dd>
         <dt>分组 / 负责人</dt><dd>${esc(x.group||'-')} / ${esc(x.owner||'-')}</dd>

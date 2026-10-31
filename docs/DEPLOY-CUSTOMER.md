@@ -10,17 +10,23 @@
 
 ```bash
 git clone <repo> && cd p2s
+export P2S_CONSOLE_PASSWORD='<给客户设置一个口令>'
 docker compose up -d
-# 浏览器打开 http://<服务器>:18080
+# 浏览器打开 http://127.0.0.1:18080 → 输入口令
 ```
 
-只暴露一个 HTTP 端口。数据落在 `p2s_data` 卷里。
+只暴露一个 HTTP 端口，且默认只发布到回环地址；数据落在 `p2s_data` 卷里。
+
+> **口令是必须的**：未设置 `P2S_CONSOLE_PASSWORD` 时控制台会随机生成一个，
+> 并打印在容器日志里（`docker compose logs console`）。不要把一个没有口令的
+> 扫描控制台暴露到网络上——任何能访问它的人都能驱动主动探测。
 
 **给客户的说明模板：**
 
 > 本工具仅做资产识别与漏洞暴露面评估，**不修改任何被检系统**。
 > 主动探测会向目标发送最小化的无害请求，请确认目标均在授权范围内。
-> 客户侧日志目录通过 `./logs:/app/logs:ro` **只读**挂载。
+> 客户侧日志目录通过 `./logs:/app/logs:ro` **只读**挂载；控制台也有日志路径白名单，
+> 只能读取这几类目录内的文件。
 
 **要求**：Docker 20.10+ / Docker Compose v2。
 
@@ -80,7 +86,8 @@ L3（生效配置、落地文件、进程、连接）必须在目标主机本地
 pip install p2s            # 或从源码安装
 cat >/etc/systemd/system/p2s-agent.service <<'EOF'
 [Service]
-ExecStart=/usr/local/bin/p2s-agent --console http://console.internal:18080
+Environment=P2S_AGENT_TOKEN=<与控制台一致的令牌>
+ExecStart=/usr/local/bin/p2s agent --console http://console.internal:18080 --interval 3600
 User=root
 EOF
 
@@ -99,9 +106,16 @@ systemctl enable --now p2s-agent.timer
 ### Windows（计划任务）
 
 ```powershell
-p2s-agent.exe --console http://console.internal:18080 --interval 3600
-# 注册为计划任务：程序 p2s-agent.exe，参数如上，触发器为系统启动时 + 每 1 小时重复
+$env:P2S_AGENT_TOKEN = "<与控制台一致的令牌>"
+p2s agent --console http://console.internal:18080 --interval 3600
+# 注册为计划任务：程序 p2s.exe，参数 "agent --console ... --interval 3600"，触发器为系统启动时 + 每 1 小时重复
 ```
+
+> Agent 上报接口要求 `X-P2S-Token` 头（值 = 控制台的 `P2S_AGENT_TOKEN`），
+> 否则返回 401 —— 一个无鉴权的上报接口等于让任何人往台账里投毒。
+>
+> 命令形式：`p2s agent ...` 与 `p2s-agent ...` 等价。前者在任何安装方式下都可用；
+> 后者需要 `pip install p2s` 之后才会生成（旧的可编辑安装要重装一次）。
 
 ---
 
