@@ -4,7 +4,7 @@
   --border:#e4e7ec; --border-2:#d0d5dd; --border-3:#98a2b3;
   /* 图表专用：浅色下比 border-3 深一点，深色下比 border-3 亮一点，避免扇区融进背景 */
   --chart-mute:#b7bec7; --chart-track:#e9ecf0;
-  --text:#14181f; --text-2:#545c68; --text-3:#6b7280;
+  --text:#14181f; --text-2:#4a525e; --text-3:#5b6472;
   /* 强调色只用于"选中/主操作"，图表另有低饱和色阶，避免整屏一个蓝 */
   --accent:#1f4bd8; --accent-hover:#1a40bd; --accent-soft:#eef2fd; --accent-border:#c6d3f7;
   --chart-1:#3355d1; --chart-2:#6b86de; --chart-3:#a3b3e8; --chart-4:#c9d2f0;
@@ -16,6 +16,15 @@
   --sidebar:208px; --topbar:56px;
   --sans:"Inter","Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
 }
+[data-theme="dark"] table,
+[data-theme="dark"] td,
+[data-theme="dark"] th,
+[data-theme="dark"] .muted,
+[data-theme="dark"] .sub{color:var(--text)}
+[data-theme="dark"] th,
+[data-theme="dark"] .sub{color:var(--text-2)}
+[data-theme="dark"] .muted{color:var(--text-3)}
+
 [data-theme="dark"]{
   --bg:#14171c; --surface:#1a1e25; --surface-2:#20252d; --surface-3:#272d36;
   --border:#333b47; --border-2:#414b59; --border-3:#556170;
