@@ -16,7 +16,7 @@ import pathlib
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -113,6 +113,11 @@ _DEFAULT_ITEM: dict[str, Any] = {
     "last_run": "",
     "last_job": "",
     "last_state": "",
+    # ---- 失败重试：默认重试 1 次、间隔 5 分钟 ----
+    "retry_max": 1,
+    "retry_delay_minutes": 5,
+    "retry_count": 0,
+    "next_retry_at": "",
 }
 
 
@@ -184,6 +189,22 @@ def _validate(payload: dict, base: dict | None = None) -> dict:
         if mins > 10080:
             raise HTTPException(status_code=400, detail="间隔不能超过 7 天（10080 分钟）")
         cfg["every_minutes"] = mins
+    if "retry_max" in payload:
+        try:
+            n = int(payload["retry_max"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="重试次数必须是整数") from None
+        if n < 0 or n > 5:
+            raise HTTPException(status_code=400, detail="重试次数取值 0-5")
+        cfg["retry_max"] = n
+    if "retry_delay_minutes" in payload:
+        try:
+            d = int(payload["retry_delay_minutes"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="重试间隔必须是整数") from None
+        if d < 1 or d > 1440:
+            raise HTTPException(status_code=400, detail="重试间隔取值 1-1440 分钟")
+        cfg["retry_delay_minutes"] = d
     for k in ("cidr", "group", "name", "notify_url"):
         if k in payload:
             cfg[k] = str(payload.get(k) or "").strip()
@@ -274,6 +295,29 @@ def api_set_schedule(payload: dict) -> dict:
     return items[0]
 
 
+def next_retry(cfg: dict, job_state: str, now: datetime | None = None) -> dict:
+    """根据任务终态决定下一步：返回需要写回的字段（纯函数，便于测试）。
+
+    规则：
+      · 成功/取消不计入重试，直接清零；
+      · 失败且还有额度 → 排到 now + retry_delay_minutes；
+      · 失败且额度用完 → 清零，等下一个正常周期。
+    """
+    now = now or datetime.now()
+    state = str(job_state or "")
+    if state == "done":
+        return {"retry_count": 0, "next_retry_at": ""}
+    if state in ("failed", "canceled", "cancelled"):
+        used = int(cfg.get("retry_count") or 0)
+        limit = int(cfg.get("retry_max") or 0)
+        if used < limit:
+            delay = int(cfg.get("retry_delay_minutes") or 5)
+            at = (now + timedelta(minutes=delay)).isoformat(timespec="seconds")
+            return {"retry_count": used + 1, "next_retry_at": at}
+        return {"retry_count": 0, "next_retry_at": ""}
+    return {}
+
+
 def _notify(cfg: dict, job: dict) -> None:
     """任务结束后回调 Webhook（失败不影响调度）。"""
     url = str(cfg.get("notify_url") or "")
@@ -312,19 +356,31 @@ def _fire(cfg: dict, items: list[dict] | None = None) -> dict:
                 items[i] = cfg
         save_schedules(items)
 
-    if cfg.get("notify_url"):
-        def waiter() -> None:
-            from . import store  # 局部导入，避免循环
-            for _ in range(120):            # 最多等 10 分钟
-                time.sleep(5)
-                try:
-                    cur = store.get_job(cfg["last_job"])
-                except Exception:
-                    return
-                if cur and cur.get("state") in ("done", "failed", "canceled"):
-                    _notify(cfg, cur)
-                    return
-        threading.Thread(target=waiter, daemon=True).start()
+    def waiter() -> None:
+        """等任务结束 → 决定是否重试 → 有 notify_url 就回调。"""
+        from . import store  # 局部导入，避免循环
+        for _ in range(240):                # 最多等 20 分钟
+            time.sleep(5)
+            try:
+                cur = store.get_job(cfg["last_job"])
+            except Exception:
+                return
+            if not cur or cur.get("state") not in ("done", "failed", "canceled", "cancelled"):
+                continue
+            patch = next_retry(cfg, cur.get("state"))
+            if patch:
+                cfg.update(patch)
+                items2 = load_schedules()
+                for i, it in enumerate(items2):
+                    if it["id"] == cfg["id"]:
+                        items2[i].update(patch)
+                        items2[i]["last_state"] = str(cur.get("state") or "")
+                        save_schedules(items2)
+                        break
+            if cfg.get("notify_url"):
+                _notify(cfg, cur)
+            return
+    threading.Thread(target=waiter, daemon=True).start()
     return job
 
 
@@ -339,8 +395,24 @@ def start_scheduler() -> None:
             try:
                 items = load_schedules()
                 changed = False
+                now = datetime.now()
                 for it in items:
-                    if it.get("enabled") and _seconds_until_next(it) <= 0:
+                    if not it.get("enabled"):
+                        continue
+                    # 优先处理到点的重试
+                    at = str(it.get("next_retry_at") or "")
+                    if at:
+                        try:
+                            due = datetime.fromisoformat(at)
+                        except ValueError:
+                            due = None
+                        if due and now >= due:
+                            it["next_retry_at"] = ""
+                            _fire(it, items)
+                            changed = True
+                            continue
+                        continue                 # 等待重试期间不触发正常周期
+                    if _seconds_until_next(it) <= 0:
                         _fire(it, items)
                         changed = True
                 if changed:

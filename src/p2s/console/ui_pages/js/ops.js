@@ -89,7 +89,8 @@ async function loadSchedule(c){
         <td class="muted" style="font-size:11.5px" data-count="${x.next_run_in}">
           ${x.enabled?mmss(x.next_run_in):'—'}</td>
         <td class="muted" style="font-size:11.5px">
-          ${x.last_run?esc(x.last_run.replace('T',' ')):'从未'}</td>
+          ${x.last_run?esc(x.last_run.replace('T',' ')):'从未'}
+          ${x.next_retry_at?`<div style="color:var(--warn)">重试 ${x.retry_count}/${x.retry_max} · ${esc(String(x.next_retry_at).slice(11,16))}</div>`:''}</td>
         <td><div class="act-row">
           <button class="btn sm" data-act="toggle">${x.enabled?'停用':'启用'}</button>
           <button class="btn sm" data-act="run">立即执行</button>
@@ -174,6 +175,14 @@ function scheduleDialog(item, done){
         <div class="field" style="flex:2 1 260px"><label>失败通知 Webhook（可选）</label>
           <input id="sd-url" placeholder="https://hooks.example.com/p2s" value="${esc(it.notify_url||'')}"></div>
       </div>
+      <div class="row" style="margin-bottom:10px">
+        <div class="field" style="flex:0 0 150px"><label>失败重试次数</label>
+          <input id="sd-retry" type="number" min="0" max="5" value="${esc(String(it.retry_max??1))}"></div>
+        <div class="field" style="flex:0 0 160px"><label>重试间隔（分钟）</label>
+          <input id="sd-delay" type="number" min="1" max="1440" value="${esc(String(it.retry_delay_minutes??5))}"></div>
+        <div class="hint" style="flex:1;align-self:center;padding-top:14px">
+          任务失败后按此间隔再跑，最多重试 N 次；0 表示不重试</div>
+      </div>
       <label class="check" style="margin-bottom:8px"><input type="checkbox" id="sd-save" ${it.save!==false?'checked':''}>
         <span>结果写入资产台账</span></label>
       <label class="check"><input type="checkbox" id="sd-on" ${it.enabled?'checked':''}>
@@ -196,6 +205,8 @@ function scheduleDialog(item, done){
       group:$('#sd-group').value.trim()||'auto',
       notify_url:$('#sd-url').value.trim(),
       save:$('#sd-save').checked, enabled:$('#sd-on').checked, quick:true,
+      retry_max:parseInt($('#sd-retry').value||'0',10),
+      retry_delay_minutes:parseInt($('#sd-delay').value||'5',10),
     };
     const btn=$('#sd-ok'); btn.disabled=true;
     try{
