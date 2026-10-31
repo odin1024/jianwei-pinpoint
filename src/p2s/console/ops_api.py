@@ -15,6 +15,7 @@ import json
 import pathlib
 import threading
 import time
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -98,72 +99,67 @@ def api_audit(limit: int = 200, q: str = "") -> dict:
 # --------------------------------------------------------------------------
 # 定时扫描
 # --------------------------------------------------------------------------
-_DEFAULT_SCHEDULE: dict[str, Any] = {
+_DEFAULT_ITEM: dict[str, Any] = {
+    "id": "",
+    "name": "",
     "enabled": False,
     "every_minutes": 60,
     "cidr": "",
     "hosts": [],
     "quick": True,
     "save": True,
+    "group": "auto",
+    "notify_url": "",
     "last_run": "",
     "last_job": "",
+    "last_state": "",
 }
 
 
-def load_schedule() -> dict:
-    cfg = dict(_DEFAULT_SCHEDULE)
+def _new_id() -> str:
+    return "sch-" + uuid.uuid4().hex[:8]
+
+
+def load_schedules() -> list[dict]:
+    """读取全部计划；兼容旧的"单条对象"格式，自动迁移成列表。"""
+    raw: Any = {}
     if SCHEDULE_FILE.exists():
         try:
-            cfg.update(json.loads(SCHEDULE_FILE.read_text(encoding="utf-8")))
+            raw = json.loads(SCHEDULE_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            pass
-    return cfg
+            raw = {}
+
+    if isinstance(raw, dict) and isinstance(raw.get("schedules"), list):
+        items = raw["schedules"]
+    elif isinstance(raw, dict) and ("cidr" in raw or "every_minutes" in raw):
+        items = [raw]                       # 旧格式：单条
+    else:
+        items = []
+
+    out: list[dict] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        cfg = dict(_DEFAULT_ITEM)
+        cfg.update(it)
+        if not cfg["id"]:
+            cfg["id"] = _new_id()
+        if not cfg["name"]:
+            cfg["name"] = cfg["cidr"] or (cfg["hosts"][0] if cfg["hosts"] else "未命名计划")
+        out.append(cfg)
+    return out
 
 
-def save_schedule(cfg: dict) -> None:
-    _atomic_write(SCHEDULE_FILE, json.dumps(cfg, ensure_ascii=False, indent=2))
-
-
-@router.get("/api/schedule")
-def api_get_schedule() -> dict:
-    cfg = load_schedule()
-    cfg["next_run_in"] = _seconds_until_next(cfg)
-    return cfg
-
-
-@router.post("/api/schedule")
-def api_set_schedule(payload: dict) -> dict:
-    cfg = load_schedule()
-    if "enabled" in payload:
-        cfg["enabled"] = bool(payload["enabled"])
-    if "every_minutes" in payload:
-        try:
-            mins = int(payload["every_minutes"])
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="every_minutes 必须是整数") from None
-        if mins < 5:
-            raise HTTPException(status_code=400, detail="间隔不能小于 5 分钟")
-        cfg["every_minutes"] = mins
-    if "cidr" in payload:
-        cfg["cidr"] = str(payload.get("cidr") or "").strip()
-    if "hosts" in payload:
-        v = payload.get("hosts") or []
-        cfg["hosts"] = [str(x).strip() for x in v if str(x).strip()][:1024]
-    if "quick" in payload:
-        cfg["quick"] = bool(payload["quick"])
-    if "save" in payload:                 # 结果是否写入资产台账（此前被忽略，导致定时扫描不入库）
-        cfg["save"] = bool(payload["save"])
-    if "group" in payload:
-        cfg["group"] = str(payload.get("group") or "auto")
-    if not cfg.get("cidr") and not cfg.get("hosts"):
-        raise HTTPException(status_code=400, detail="必须填写网段或主机列表")
-    save_schedule(cfg)
-    return cfg
+def save_schedules(items: list[dict]) -> None:
+    _atomic_write(SCHEDULE_FILE,
+                  json.dumps({"schedules": items}, ensure_ascii=False, indent=2))
 
 
 def _seconds_until_next(cfg: dict) -> int:
-    if not cfg.get("enabled") or not cfg.get("last_run"):
-        return 0 if cfg.get("enabled") else -1
+    if not cfg.get("enabled"):
+        return -1
+    if not cfg.get("last_run"):
+        return 0
     try:
         last = datetime.fromisoformat(str(cfg["last_run"]))
     except ValueError:
@@ -172,21 +168,168 @@ def _seconds_until_next(cfg: dict) -> int:
     return max(0, int(due - time.time()))
 
 
-def _fire(cfg: dict) -> None:
-    """按与手动扫描相同的路径提交任务。"""
+def _validate(payload: dict, base: dict | None = None) -> dict:
+    """把请求体合并进一条计划并做校验，返回新对象。"""
+    cfg = dict(base or _DEFAULT_ITEM)
+    for k in ("enabled", "quick", "save"):
+        if k in payload:
+            cfg[k] = bool(payload[k])
+    if "every_minutes" in payload:
+        try:
+            mins = int(payload["every_minutes"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="间隔必须是整数") from None
+        if mins < 5:
+            raise HTTPException(status_code=400, detail="间隔不能小于 5 分钟")
+        if mins > 10080:
+            raise HTTPException(status_code=400, detail="间隔不能超过 7 天（10080 分钟）")
+        cfg["every_minutes"] = mins
+    for k in ("cidr", "group", "name", "notify_url"):
+        if k in payload:
+            cfg[k] = str(payload.get(k) or "").strip()
+    if "hosts" in payload:
+        cfg["hosts"] = [str(x).strip() for x in (payload.get("hosts") or []) if str(x).strip()][:1024]
+    if not cfg.get("cidr") and not cfg.get("hosts"):
+        raise HTTPException(status_code=400, detail="必须填写网段或主机列表")
+    if cfg.get("notify_url") and not str(cfg["notify_url"]).startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="通知地址必须以 http:// 或 https:// 开头")
+    if not cfg.get("name"):
+        cfg["name"] = cfg.get("cidr") or (cfg.get("hosts") or ["未命名计划"])[0]
+    return cfg
+
+
+@router.get("/api/schedules")
+def api_list_schedules() -> dict:
+    items = load_schedules()
+    for it in items:
+        it["next_run_in"] = _seconds_until_next(it)
+    return {"schedules": items, "total": len(items),
+            "enabled": sum(1 for x in items if x.get("enabled"))}
+
+
+@router.post("/api/schedules")
+def api_create_schedule(payload: dict) -> dict:
+    cfg = _validate(payload)
+    cfg["id"] = _new_id()
+    items = load_schedules()
+    items.append(cfg)
+    save_schedules(items)
+    return cfg
+
+
+@router.patch("/api/schedules/{sid}")
+def api_update_schedule(sid: str, payload: dict) -> dict:
+    items = load_schedules()
+    for i, it in enumerate(items):
+        if it["id"] != sid:
+            continue
+        items[i] = _validate(payload, it)
+        items[i]["id"] = sid
+        save_schedules(items)
+        return items[i]
+    raise HTTPException(status_code=404, detail="计划不存在")
+
+
+@router.delete("/api/schedules/{sid}")
+def api_delete_schedule(sid: str) -> dict:
+    items = load_schedules()
+    left = [x for x in items if x["id"] != sid]
+    if len(left) == len(items):
+        raise HTTPException(status_code=404, detail="计划不存在")
+    save_schedules(left)
+    return {"ok": True, "total": len(left)}
+
+
+@router.post("/api/schedules/{sid}/run")
+def api_run_schedule(sid: str) -> dict:
+    items = load_schedules()
+    for it in items:
+        if it["id"] == sid:
+            job = _fire(it, items)
+            return {"ok": True, "job": job}
+    raise HTTPException(status_code=404, detail="计划不存在")
+
+
+# ---- 兼容旧接口：单条 ----
+@router.get("/api/schedule")
+def api_get_schedule() -> dict:
+    items = load_schedules()
+    cfg = dict(items[0]) if items else dict(_DEFAULT_ITEM)
+    cfg["next_run_in"] = _seconds_until_next(cfg)
+    return cfg
+
+
+@router.post("/api/schedule")
+def api_set_schedule(payload: dict) -> dict:
+    """旧接口：没有计划就建一条，有则更新第一条。"""
+    items = load_schedules()
+    if not items:
+        cfg = _validate(payload)
+        cfg["id"] = _new_id()
+        items.append(cfg)
+    else:
+        items[0] = _validate(payload, items[0])
+        items[0]["id"] = items[0]["id"] or _new_id()
+    save_schedules(items)
+    return items[0]
+
+
+def _notify(cfg: dict, job: dict) -> None:
+    """任务结束后回调 Webhook（失败不影响调度）。"""
+    url = str(cfg.get("notify_url") or "")
+    if not url:
+        return
+    try:
+        from urllib.request import Request, urlopen
+        body = json.dumps({
+            "schedule_id": cfg.get("id"), "name": cfg.get("name"),
+            "job_id": job.get("id"), "state": job.get("state"),
+            "message": job.get("message"), "total": job.get("total"),
+            "done": job.get("done"), "error": job.get("error"),
+            "at": datetime.now().isoformat(timespec="seconds"),
+        }, ensure_ascii=False).encode()
+        req = Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        urlopen(req, timeout=8).close()
+    except Exception:
+        pass
+
+
+def _fire(cfg: dict, items: list[dict] | None = None) -> dict:
+    """按与手动扫描相同的路径提交任务，并记录 last_run / last_job。"""
     from .scan_api import JobIn, api_create_job  # 延迟导入，避免循环依赖
 
     body = JobIn(kind="discover", cidr=cfg.get("cidr") or "", hosts=cfg.get("hosts") or [],
                  quick=bool(cfg.get("quick", True)), save=bool(cfg.get("save", True)),
-                 group="auto", note="定时扫描")
+                 group=str(cfg.get("group") or "auto"), note=f"定时扫描：{cfg.get('name','')}")
     job = api_create_job(body)
     cfg["last_run"] = datetime.now().isoformat(timespec="seconds")
     cfg["last_job"] = str(job.get("id") or "")
-    save_schedule(cfg)
+    cfg["last_state"] = str(job.get("state") or "running")
+
+    if items is not None:
+        for i, it in enumerate(items):
+            if it["id"] == cfg["id"]:
+                items[i] = cfg
+        save_schedules(items)
+
+    if cfg.get("notify_url"):
+        def waiter() -> None:
+            from . import store  # 局部导入，避免循环
+            for _ in range(120):            # 最多等 10 分钟
+                time.sleep(5)
+                try:
+                    cur = store.get_job(cfg["last_job"])
+                except Exception:
+                    return
+                if cur and cur.get("state") in ("done", "failed", "canceled"):
+                    _notify(cfg, cur)
+                    return
+        threading.Thread(target=waiter, daemon=True).start()
+    return job
 
 
 def start_scheduler() -> None:
-    """后台线程：每 30 秒检查一次是否到点。幂等，重复调用不会起多个。"""
+    """后台线程：每 30 秒检查全部计划，到点的逐个触发。"""
     if getattr(start_scheduler, "_started", False):
         return
     start_scheduler._started = True  # type: ignore[attr-defined]
@@ -194,9 +337,14 @@ def start_scheduler() -> None:
     def loop() -> None:
         while True:
             try:
-                cfg = load_schedule()
-                if cfg.get("enabled") and _seconds_until_next(cfg) <= 0:
-                    _fire(cfg)
+                items = load_schedules()
+                changed = False
+                for it in items:
+                    if it.get("enabled") and _seconds_until_next(it) <= 0:
+                        _fire(it, items)
+                        changed = True
+                if changed:
+                    save_schedules(items)
                 maybe_prune()
             except Exception:
                 pass

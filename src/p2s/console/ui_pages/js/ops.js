@@ -50,127 +50,159 @@ async function loadAudit(c){
 
 /* ==================== 计划任务 ==================== */
 async function loadSchedule(c){
-  const s=await api('/api/schedule');
-  let hist=[];
-  try{
-    const all=await api('/api/jobs?limit=60');
-    const list=Array.isArray(all)?all:(all&&all.jobs)||[];
-    hist=list
-      .filter(j=>['auto','自动'].includes((j.params||{}).group))
-      .slice(0,6);
-  }catch(e){ hist=[] }
-  const next = s.enabled
-    ? (s.next_run_in>0 ? Math.ceil(s.next_run_in/60)+' 分钟后' : '即将执行')
-    : '未启用';
-  const stateTag = s.enabled ? tag('ok','已启用') : tag('mute','未启用');
+  if(window._p2sSchedTimer){ clearInterval(window._p2sSchedTimer); window._p2sSchedTimer=null }
+
+  const [res, jobsRes] = await Promise.all([
+    api('/api/schedules'),
+    api('/api/jobs?limit=80').catch(()=>({jobs:[]})),
+  ]);
+  const list = res.schedules || [];
+  const allJobs = Array.isArray(jobsRes) ? jobsRes : (jobsRes.jobs || []);
+  const autoJobs = allJobs.filter(j=>(j.params||{}).group &&
+        ['auto','自动'].includes((j.params||{}).group)).slice(0,6);
+
+  const mmss = (sec)=>{
+    if(sec < 0) return '—';
+    if(sec === 0) return '即将执行';
+    const m=Math.floor(sec/60), s=sec%60;
+    return m>0 ? `${m} 分 ${String(s).padStart(2,'0')} 秒` : `${s} 秒`;
+  };
 
   c.innerHTML=`
   <div class="page-narrow"><div class="page-head"><div><h2>计划任务</h2>
-    <p>按固定间隔自动发起设备发现 · 与手动扫描走完全相同的任务路径</p></div></div>
+    <p>多条计划并存 · 各自独立间隔与分组 · 与手动扫描走完全相同的任务路径</p></div></div>
+
   <div class="card">
-    <div class="card-h"><h3>定时扫描</h3>${stateTag}<div class="sp"></div>
-      <span class="muted" style="font-size:11.5px">下次执行：${esc(next)}</span></div>
-    <div class="card-b">
-      <div class="field" style="margin-bottom:12px">
-        <label class="check" for="sc-on">
-          <input type="checkbox" id="sc-on" ${s.enabled?'checked':''}>
-          <span>启用定时扫描（按间隔自动发起，结果入「自动」分组）</span>
-        </label>
-      </div>
-
-      <div class="row" style="margin-bottom:14px">
-        <div class="field" style="flex:2 1 320px">
-          <label for="sc-cidr">扫描网段</label>
-          <input id="sc-cidr" placeholder="例如 192.168.1.0/24；也可以填单个 IP"
-                 value="${esc(s.cidr||'')}">
-        </div>
-        <div class="field" style="flex:0 0 150px">
-          <label for="sc-every">间隔（分钟）</label>
-          <input id="sc-every" type="number" min="5" max="10080"
-                 value="${esc(String(s.every_minutes||60))}">
-        </div>
-        <button class="btn primary" id="sc-save">保存</button>
-        <button class="btn" id="sc-run" ${s.cidr||(s.hosts||[]).length?'':'disabled'}
-                title="用当前配置立刻跑一次，不影响定时计划">立即执行一次</button>
-      </div>
-
-      <div class="field" style="margin-bottom:12px">
-        <label class="check" for="sc-save-db">
-          <input type="checkbox" id="sc-save-db" ${s.save!==false?'checked':''}>
-          <span>结果写入资产台账（关闭则只跑任务、不留资产画像）</span>
-        </label>
-      </div>
-
-      <div id="sc-err" class="hint" style="color:var(--danger);display:none;margin-bottom:8px"></div>
-
-      <div class="hint">
-        上次执行：${s.last_run?esc(s.last_run.replace('T',' ')):'从未'}
-        ${s.last_job?`· 任务 <span class="mono">${esc(s.last_job)}</span>`:''}<br>
-        定时任务按「自动」分组入库，可在任务中心查看进度与结果；间隔最小 5 分钟。
-      </div>
-    </div>
+    <div class="card-h"><h3>扫描计划</h3>
+      ${tag(list.length?'info':'mute', list.length+' 条')}
+      <div class="sp"></div>
+      <button class="btn primary" id="sc-add">新增计划</button></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>名称</th><th>网段</th><th class="num">间隔</th><th>分组</th>
+        <th>状态</th><th>下次执行</th><th>最近一次</th><th style="width:150px"></th></tr></thead>
+      <tbody>${list.map(x=>`<tr data-id="${esc(x.id)}">
+        <td><b>${esc(x.name||x.id)}</b></td>
+        <td class="mono" style="font-size:11.5px">${esc(x.cidr||((x.hosts||[]).join(', ')||'-'))}</td>
+        <td class="num">${x.every_minutes} 分钟</td>
+        <td><span class="tag mute">${esc(x.group||'auto')}</span></td>
+        <td>${x.enabled?tag('ok','已启用'):tag('mute','已停用')}</td>
+        <td class="muted" style="font-size:11.5px" data-count="${x.next_run_in}">
+          ${x.enabled?mmss(x.next_run_in):'—'}</td>
+        <td class="muted" style="font-size:11.5px">
+          ${x.last_run?esc(x.last_run.replace('T',' ')):'从未'}</td>
+        <td><div class="act-row">
+          <button class="btn sm" data-act="toggle">${x.enabled?'停用':'启用'}</button>
+          <button class="btn sm" data-act="run">立即执行</button>
+          <button class="btn sm ghost" data-act="del">删除</button>
+        </div></td></tr>`).join('')
+        ||`<tr><td colspan="8">${emptyState('clock','还没有扫描计划','点右上角「新增计划」创建第一条')}</td></tr>`}
+      </tbody></table></div>
   </div>
 
   <div class="card" style="margin-top:14px">
     <div class="card-h"><h3>最近自动扫描</h3><div class="sp"></div>
-      <span class="muted" style="font-size:11.5px">最多显示 6 条 · 完整历史见任务中心</span></div>
+      <span class="muted" style="font-size:11.5px">最多 6 条 · 完整历史见任务中心</span></div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>任务</th><th>状态</th><th>结果</th><th>开始时间</th><th style="width:70px"></th></tr></thead>
-      <tbody>${hist.map(j=>`<tr>
+      <thead><tr><th>任务</th><th>状态</th><th>结果</th><th>开始时间</th></tr></thead>
+      <tbody>${autoJobs.map(j=>`<tr>
         <td class="mono" style="font-size:11.5px">${esc(j.title||j.id)}</td>
         <td>${tag(j.state==='done'?'ok':(j.state==='failed'?'crit':'mute'),
                   j.state==='done'?'已完成':(j.state==='failed'?'失败':'运行中'))}</td>
         <td class="muted" style="font-size:11.5px">${esc((j.message||'').slice(0,40))}</td>
         <td class="muted" style="font-size:11.5px">${esc(fmtTime(j.created_at))}</td>
-        <td><button class="btn ghost" data-job="${esc(j.id)}">查看</button></td>
-      </tr>`).join('')||`<tr><td colspan="5">${emptyState('clock','还没有自动扫描记录','启用定时任务或点「立即执行一次」后出现')}</td></tr>`}</tbody>
+      </tr>`).join('')||`<tr><td colspan="4">${emptyState('clock','还没有自动扫描记录','启用计划后到点会自动触发')}</td></tr>`}</tbody>
     </table></div>
   </div>`;
 
-  c.querySelectorAll('[data-job]').forEach(b=>b.onclick=()=>go('tasks'));
+  // 倒计时：每秒 -1，不重新请求
+  window._p2sSchedTimer=setInterval(()=>{
+    c.querySelectorAll('[data-count]').forEach(el=>{
+      let v=parseInt(el.dataset.count,10);
+      if(isNaN(v)||v<0) return;
+      v=Math.max(0,v-1); el.dataset.count=v; el.textContent=mmss(v);
+    });
+  },1000);
 
-  const showErr=(m)=>{const e=$('#sc-err'); e.textContent=m; e.style.display=m?'block':'none'};
-  const validCidr=(v)=>{
-    if(!v) return '请填写网段或 IP';
-    if(!/^[0-9a-fA-F:.\/]+$/.test(v)) return '网段只允许数字、点、冒号与斜杠';
-    const m=v.match(/^(\d{1,3}(?:\.\d{1,3}){3})(?:\/(\d{1,2}))?$/);
-    if(m){
-      const ok=m[1].split('.').every(x=>Number(x)<=255);
-      if(!ok) return 'IPv4 每段必须在 0-255 之间';
-      if(m[2]!==undefined && Number(m[2])>32) return '掩码不能大于 /32';
-      return '';
-    }
-    return '';   // 交给后端判断（IPv6 / 主机名）
-  };
+  c.querySelectorAll('tr[data-id]').forEach(tr=>{
+    const id=tr.dataset.id;
+    tr.querySelectorAll('[data-act]').forEach(b=>{
+      b.onclick=async()=>{
+        const act=b.dataset.act;
+        b.disabled=true;
+        try{
+          if(act==='run'){
+            const r=await api('/api/schedules/'+id+'/run',{method:'POST'});
+            toast('已提交任务 '+(r.job&&r.job.id||''),'ok');
+          }else if(act==='toggle'){
+            const cur=list.find(x=>x.id===id);
+            await api('/api/schedules/'+id,{method:'PATCH',body:{enabled:!cur.enabled}});
+            toast(cur.enabled?'已停用':'已启用','ok');
+          }else if(act==='del'){
+            const ok=await askConfirm({title:'删除计划',
+              message:'删除后不会再自动扫描，已产生的历史记录不受影响。',confirm:'删除'});
+            if(!ok){ b.disabled=false; return }
+            await api('/api/schedules/'+id,{method:'DELETE'});
+            toast('已删除','ok');
+          }
+          loadSchedule(c);
+        }catch(e){ toast('操作失败: '+e.message,'err'); b.disabled=false }
+      };
+    });
+  });
 
-  $('#sc-save').onclick=async()=>{
-    const cidr=$('#sc-cidr').value.trim();
-    const err=validCidr(cidr);
-    if(err){ showErr(err); return }
-    showErr('');
-    const btn=$('#sc-save'); btn.disabled=true;
+  $('#sc-add').onclick=()=>scheduleDialog(null,()=>loadSchedule(c));
+}
+
+/* 新增 / 编辑计划 */
+function scheduleDialog(item, done){
+  const it=item||{enabled:true,every_minutes:60,cidr:'',group:'auto',save:true,notify_url:''};
+  const bg=document.createElement('div'); bg.className='modal-bg on';
+  const box=document.createElement('div'); box.className='modal wide';
+  box.innerHTML=`<h3>${item?'编辑计划':'新增计划'}</h3>
+    <div class="mbody">
+      <div class="field" style="margin-bottom:10px"><label>名称（可选）</label>
+        <input id="sd-name" placeholder="例如：办公网段" value="${esc(it.name||'')}"></div>
+      <div class="row" style="margin-bottom:10px">
+        <div class="field" style="flex:2 1 260px"><label>扫描网段 / IP</label>
+          <input id="sd-cidr" placeholder="192.168.1.0/24" value="${esc(it.cidr||'')}"></div>
+        <div class="field" style="flex:0 0 140px"><label>间隔（分钟）</label>
+          <input id="sd-every" type="number" min="5" max="10080" value="${esc(String(it.every_minutes||60))}"></div>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <div class="field" style="flex:1 1 160px"><label>入库分组</label>
+          <input id="sd-group" placeholder="auto" value="${esc(it.group||'auto')}"></div>
+        <div class="field" style="flex:2 1 260px"><label>失败通知 Webhook（可选）</label>
+          <input id="sd-url" placeholder="https://hooks.example.com/p2s" value="${esc(it.notify_url||'')}"></div>
+      </div>
+      <label class="check" style="margin-bottom:8px"><input type="checkbox" id="sd-save" ${it.save!==false?'checked':''}>
+        <span>结果写入资产台账</span></label>
+      <label class="check"><input type="checkbox" id="sd-on" ${it.enabled?'checked':''}>
+        <span>保存后立即启用</span></label>
+      <div id="sd-err" class="hint" style="color:var(--danger);display:none;margin-top:8px"></div>
+    </div>
+    <div class="mfoot"><button class="btn" id="sd-cancel">取消</button>
+      <button class="btn primary" id="sd-ok">保存</button></div>`;
+  bg.appendChild(box); document.body.appendChild(bg);
+  const close=()=>bg.remove();
+  bg.onclick=e=>{ if(e.target===bg) close() };
+  $('#sd-cancel').onclick=close;
+  $('#sd-ok').onclick=async()=>{
+    const err=$('#sd-err'); err.style.display='none';
+    const cidr=$('#sd-cidr').value.trim();
+    if(!cidr){ err.textContent='请填写扫描网段'; err.style.display='block'; return }
+    const body={
+      name:$('#sd-name').value.trim(), cidr,
+      every_minutes:parseInt($('#sd-every').value||'60',10),
+      group:$('#sd-group').value.trim()||'auto',
+      notify_url:$('#sd-url').value.trim(),
+      save:$('#sd-save').checked, enabled:$('#sd-on').checked, quick:true,
+    };
+    const btn=$('#sd-ok'); btn.disabled=true;
     try{
-      await api('/api/schedule',{method:'POST',body:{
-        enabled:$('#sc-on').checked,
-        every_minutes:parseInt($('#sc-every').value||'60',10),
-        cidr, quick:true, save:$('#sc-save-db').checked, group:'auto'}});
-      toast('已保存','ok'); loadSchedule($('#content'));
-    }catch(e){toast('保存失败: '+e.message,'err')}
-    finally{btn.disabled=false}
-  };
-
-  $('#sc-run').onclick=async()=>{
-    const cidr=$('#sc-cidr').value.trim();
-    const err=validCidr(cidr);
-    if(err){ showErr(err); return }
-    showErr('');
-    const btn=$('#sc-run'); btn.disabled=true; btn.textContent='已提交…';
-    try{
-      const r=await api('/api/jobs',{method:'POST',body:{
-        kind:'discover', hosts:[cidr], quick:true, save:true, group:'自动'}});
-      toast('已提交任务 '+(r.id||''),'ok');
-    }catch(e){toast('提交失败: '+e.message,'err')}
-    finally{btn.disabled=false; btn.textContent='立即执行一次'}
+      if(item) await api('/api/schedules/'+item.id,{method:'PATCH',body});
+      else await api('/api/schedules',{method:'POST',body});
+      toast('已保存','ok'); close(); done&&done();
+    }catch(e){ err.textContent=e.message; err.style.display='block'; btn.disabled=false }
   };
 }
 
