@@ -68,7 +68,7 @@ def test_key_selectors_are_top_level() -> None:
     """关键选择器必须位于顶层；被嵌套就意味着它们不会生效。"""
     depth = 0
     seen: dict[str, int] = {}
-    for i, line in enumerate(_lines(), 1):
+    for line in _lines():
         if depth == 0:
             for sel in TOP_LEVEL_OK:
                 if line.startswith(sel + "{") or line.startswith(sel + " "):
