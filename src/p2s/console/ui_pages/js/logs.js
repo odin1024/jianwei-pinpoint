@@ -44,6 +44,33 @@ async function loadLogs(c){
     </div></div>
   </div>
 
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-h"><h3>历史分析</h3><div class="sp"></div>
+      <span class="muted" style="font-size:11.5px">最多 30 条 · 点选即回看</span></div>
+    <div class="card-b">
+      <div class="row" style="margin-bottom:10px">
+        <div class="field" style="flex:1 1 320px"><label>选择一次日志分析</label>
+          <select id="l-hist"><option value="">（加载中…）</option></select></div>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:0 0 150px"><label>时间范围</label>
+          <select id="l-range">
+            <option value="all">全部</option><option value="1h">最近 1 小时</option>
+            <option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option>
+          </select></div>
+        <div class="field" style="flex:0 0 150px"><label>等级</label>
+          <select id="l-sev">
+            <option value="all">全部</option><option value="critical">严重</option>
+            <option value="high">高危</option><option value="medium">中危</option>
+            <option value="low">低危</option>
+          </select></div>
+        <div class="field" style="flex:1 1 240px"><label>关键字（IP / URI / 规则）</label>
+          <input id="l-kw" placeholder="例如 10.0.0.5 或 admin.php"></div>
+        <span class="muted" id="l-count" style="align-self:flex-end;padding-bottom:6px;font-size:12px"></span>
+      </div>
+    </div>
+  </div>
+
   <div id="l-out"></div>`;
 
   $('#l-run').onclick=async()=>{
@@ -56,13 +83,51 @@ async function loadLogs(c){
       toast('任务已提交 '+r.id,'ok');watchJob(r.id,'logs')}
     catch(e){$('#l-out').innerHTML='<div class="card"><div class="card-b">'+emptyState('alert','分析失败',e.message)+'</div></div>'}
   };
+  loadLogHistory();
+
+  const rng=$('#l-range'), sev=$('#l-sev'), kw=$('#l-kw');
+  if(rng) rng.onchange=e=>{LOG_STATE.filter.range=e.target.value; rerenderLog()};
+  if(sev) sev.onchange=e=>{LOG_STATE.filter.sev=e.target.value; rerenderLog()};
+  let kwTimer=null;
+  if(kw) kw.oninput=e=>{
+    clearTimeout(kwTimer);
+    kwTimer=setTimeout(()=>{LOG_STATE.filter.kw=e.target.value.trim(); rerenderLog()},200);
+  };
+
   const dz=$('#l-drop'),fi=$('#l-file');
   dz.onclick=()=>fi.click();
   dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};
   dz.ondragleave=()=>dz.classList.remove('over');
   dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');if(e.dataTransfer.files[0])uploadFile(e.dataTransfer.files[0])};
   fi.onchange=()=>{if(fi.files[0])uploadFile(fi.files[0])};
-  async function uploadFile(file){
+  async function loadLogHistory(){
+  const sel=$('#l-hist'); if(!sel) return;
+  try{
+    const d=await api('/api/scans?limit=100');
+    const rows=(d.scans||[]).filter(x=>x.kind==='logs');
+    const opts=rows.slice(0,30).map(x=>{
+      const name=x.target_label||x.scan_id;
+      const when=(x.started_at||'').replace('T',' ').slice(5,16);
+      const sc=x.severity_counts||{};
+      const n=(sc.critical||0)+(sc.high||0)+(sc.medium||0)+(sc.low||0);
+      const brief=n?`严重 ${sc.critical||0}/高危 ${sc.high||0} · 共 ${n} 条`:'无命中';
+      return `<option value="${esc(x.scan_id)}">${esc(when)} · ${esc(name)} · ${brief}</option>`;
+    }).join('');
+    sel.innerHTML=opts||'<option value="">（还没有历史分析）</option>';
+    sel.onchange=async()=>{
+      const id=sel.value; if(!id) return;
+      $('#l-out').innerHTML='<div class="card"><div class="card-b">'+emptyState('clock','加载中…')+'</div></div>';
+      try{
+        const data=await api('/api/scans/'+id+'/data');
+        LOG_STATE.data=data; LOG_STATE.findings=data.findings||[];
+        rerenderLog();
+      }catch(e){ $('#l-out').innerHTML='<div class="card"><div class="card-b">'+emptyState('alert','加载失败',e.message)+'</div></div>' }
+    };
+    if(rows.length){ sel.value=rows[0].scan_id; sel.onchange(); }
+  }catch(e){ sel.innerHTML='<option value="">（加载历史失败）</option>' }
+}
+
+async function uploadFile(file){
     if(!await dupGuard('logs', file.name)) return;
     $('#l-out').innerHTML='<div class="card"><div class="card-b">'+emptyState('clock','上传并分析中…')+'</div></div>';
     const fd=new FormData(); fd.append('file',file);
@@ -83,8 +148,39 @@ async function watchJob(id,kind){
     }catch(e){clearInterval(t)}
   },1200);
 }
-function renderLog(r){
+let LOG_STATE={data:null, findings:[], filter:{range:'all', sev:'all', kw:''}};
+
+function logFiltered(){
+  const f=LOG_STATE.filter;
+  const now=Date.now();
+  const span={'1h':3600e3,'24h':86400e3,'7d':7*86400e3}[f.range]||0;
+  const kw=(f.kw||'').toLowerCase();
+  return (LOG_STATE.data&&LOG_STATE.data.findings||[]).filter(x=>{
+    if(f.sev!=='all' && x.severity!==f.sev) return false;
+    if(span){
+      const t=Date.parse(String(x.ts||'').replace(' ','T'));
+      if(!isNaN(t) && now-t>span) return false;
+    }
+    if(kw){
+      const hay=((x.ip||'')+' '+(x.uri||'')+' '+(x.rule_id||'')+' '+(x.rule_name||'')).toLowerCase();
+      if(!hay.includes(kw)) return false;
+    }
+    return true;
+  });
+}
+
+function rerenderLog(){
+  if(!LOG_STATE.data) return;
+  const all=(LOG_STATE.data.findings||[]).length;
+  const shown=logFiltered().length;
+  const el=document.getElementById('l-count');
+  if(el) el.textContent=`显示 ${shown} / ${all} 条`;
+  renderLog(LOG_STATE.data, logFiltered());
+}
+
+function renderLog(r, list){
   const cov=r.coverage||{};
+  const findings=list!==undefined?list:(r.findings||[]);
   $('#l-out').innerHTML=`
   <div class="grid kpis">
     <div class="kpi"><div class="k">总体风险</div><div class="v ${r.risk==='critical'?'danger':''}" style="font-size:18px">${esc((r.risk||'').toUpperCase())}</div><div class="d">${r.findings.length} 条命中</div></div>
@@ -97,7 +193,7 @@ function renderLog(r){
     <div class="card-h"><h3>命中明细</h3><div class="sp"></div>
       <button class="btn sm" onclick="viewReport(${jss(r.scan_id)})">${ico('file','s12')}查看报告</button></div>
     <div class="tbl-wrap"><table><thead><tr><th>规则</th><th>名称</th><th>等级</th><th>维度</th><th>时间</th><th>来源 IP</th><th>URI</th><th>证据</th></tr></thead>
-      <tbody>${(r.findings||[]).map(f=>`<tr>
+      <tbody>${findings.map(f=>`<tr>
         <td class="mono">${esc(f.rule_id)}</td><td style="font-size:12px">${esc(f.rule_name)}</td>
         <td>${tag((RISK[f.severity]||['mute',f.severity])[0],(RISK[f.severity]||['mute',f.severity])[1])}</td>
         <td class="muted" style="font-size:11.5px">${esc(f.dimension)}</td>

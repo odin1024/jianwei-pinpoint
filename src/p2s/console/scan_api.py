@@ -36,6 +36,18 @@ def api_scans(limit: int = 50, offset: int = 0, full: bool = False) -> dict:
     return {"scans": scans, "total": total, "offset": offset, "limit": limit}
 
 
+@router.get("/api/scans/{scan_id}/data")
+def api_scan_data(scan_id: str) -> dict:
+    """取某次扫描的完整结果（历史回看用，日志分析页需要 findings 明细）。"""
+    p = SCANS_DIR / f"{scan_id}.json"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="扫描记录不存在")
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        raise HTTPException(status_code=500, detail="扫描记录损坏") from None
+
+
 @router.get("/api/scans/{scan_id}/report", response_class=PlainTextResponse)
 def api_report(scan_id: str, fmt: str = "md") -> str:
     p = SCANS_DIR / f"{scan_id}.{fmt}"
