@@ -1,4 +1,4 @@
-"""p2s 轻量 Agent —— 在被检查的主机上运行，执行 L3 主机侧检测并上报。
+"""p2s 轻量 Agent —— 在被检查的主机上运行，执行本地取证并上报。
 
 为什么需要 Agent：
   L3 检测（生效配置、可疑文件、进程、连接）必须在目标主机本地执行，
@@ -76,7 +76,7 @@ def _handle_stop(signum, frame):  # noqa: ARG001
 
 def main(argv: list[str] | None = None) -> int:
     _ensure_utf8()
-    p = argparse.ArgumentParser(prog="p2s-agent", description="p2s 主机侧检测 Agent")
+    p = argparse.ArgumentParser(prog="p2s-agent", description="p2s 本地取证 Agent")
     p.add_argument("--console", help="控制台地址，例如 http://127.0.0.1:18080")
     p.add_argument("--token", default=os.environ.get("P2S_AGENT_TOKEN", ""),
                    help="上报令牌（默认取环境变量 P2S_AGENT_TOKEN）")

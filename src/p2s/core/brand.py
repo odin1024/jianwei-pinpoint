@@ -68,7 +68,7 @@ def favicon_data_uri(color: str = BRAND["primary"]) -> str:
 SCAN_KIND_LABELS = {
     "discover": "设备发现",
     "logs": "日志分析",
-    "host": "主机侧检测",
+    "host": "本地取证",
     "url": "URL 探测",
     "agent": "Agent 上报",
 }

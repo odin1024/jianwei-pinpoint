@@ -118,7 +118,7 @@ def to_markdown(result: ScanResult, path: str | Path) -> Path:
         lines.append("")
 
     if result.host_reports:
-        lines.append("## 主机侧检测\n")
+        lines.append("## 本地取证\n")
         for h in result.host_reports:
             lines.append(f"### {h.get('hostname')}（{h.get('platform')}） 风险 **{h.get('risk','').upper()}**\n")
             for inst in h.get("installs", []):

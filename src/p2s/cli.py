@@ -4,7 +4,7 @@
     p2s assets   --file hosts.txt --report out/       # 资产测绘 + 版本判定
     p2s probe    --file hosts.txt --report out/       # 资产测绘 + 主动探测
     p2s logs     --file access.log --report out/      # 被动日志检测
-    p2s host     --report out/                        # 主机侧检测
+    p2s host     --report out/                        # 本地取证
     p2s ioc      --scan-file sample.txt               # IOC 匹配
     p2s rules    --format sigma                       # 导出规则
     p2s serve    --port 18080                          # 启动 Web 控制台
@@ -333,7 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_report(sp)
     sp.set_defaults(func=cmd_logs)
 
-    sp = sub.add_parser("host", help="主机侧检测（L3）")
+    sp = sub.add_parser("host", help="本地取证（L3）")
     sp.add_argument("--shallow", action="store_true", help="跳过文件内容与哈希检查")
     add_report(sp)
     sp.set_defaults(func=cmd_host)

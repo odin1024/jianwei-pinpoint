@@ -1,4 +1,4 @@
-"""主机侧检测（L3）——跨平台。
+"""本地取证（L3）——跨平台。
 
 覆盖 Windows / Linux / macOS 的统一抽象：
   - PHP 安装点清点（PATH、注册表、常见目录、包管理器）
@@ -539,7 +539,7 @@ def list_connections() -> list[str]:
 
 
 def run_host_check(deep: bool = True) -> HostReport:
-    """执行完整的主机侧检测。"""
+    """执行完整的本地取证。"""
     rep = HostReport(
         hostname=platform.node(),
         platform=f"{platform.system()} {platform.machine()}",

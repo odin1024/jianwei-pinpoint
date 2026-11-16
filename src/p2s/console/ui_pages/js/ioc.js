@@ -1,7 +1,7 @@
 async function loadIoc(c){
   const r=await api('/api/ioc');
   c.innerHTML=`
-  <div class="page-head"><div><h2>IOC 中心</h2><p>来源：TU Delft INTELLAB 蜜罐观测 / NCSC-NL / CISA KEV · 更新于 ${esc(r.summary.updated)}</p></div></div>
+  <div class="page-head"><div><h2>IOC 库</h2><p>来源：TU Delft INTELLAB 蜜罐观测 / NCSC-NL / CISA KEV · 更新于 ${esc(r.summary.updated)}</p></div></div>
   <div class="grid kpis">
     <div class="kpi"><div class="k">攻击者 IP</div><div class="v num danger">${r.summary.ips}</div></div>
     <div class="kpi"><div class="k">域名</div><div class="v num">${r.summary.domains}</div></div>

@@ -207,10 +207,10 @@ function renderLog(r, list){
     <div class="card-h"><h3>覆盖缺口</h3><div class="sp"></div>${tag('warn','需开启请求体/响应体落盘')}</div>
     <div class="card-b"><div class="row">${cov.uncovered.map(r=>tag('mute',r)).join('')}</div>
     <div class="hint" style="margin-top:8px">这些规则依赖请求体或响应体字段，普通访问日志不含这些内容，因此无法命中。建议在 WAF 或反代层开启请求体记录。</div></div></div>`:''}`;
-}/* ==================== 主机侧检测 ==================== */
+}/* ==================== 本地取证 ==================== */
 async function loadHost(c){
   c.innerHTML=`
-  <div class="page-head"><div><h2>主机侧检测</h2><p>读取本机 PHP 安装点、生效配置、可疑文件、进程与连接 —— 全部只读</p></div>
+  <div class="page-head"><div><h2>本地取证</h2><p>读取本机 PHP 安装点、生效配置、可疑文件、进程与连接 —— 全部只读</p></div>
     <div class="sp"></div>
     <button class="btn" id="h-export">${ico('download','s12')}导出台账 CSV</button>
     <button class="btn primary" id="h-run">${ico('play','s12')}执行检测</button></div>
@@ -228,7 +228,7 @@ async function loadHost(c){
         或 <code>sh p2s-agent.sh</code>，采集结果自动上报并写入资产台账（标记「本地取证」）。</div>
     </div>
   </div>
-  <div id="h-out"><div class="card"><div class="card-b"><div class="empty">${ico('server')}<b>尚未执行主机侧检测</b><p>只读取证，不修改任何文件；结果会写入资产台账并标记「本地取证」。</p><ol class="steps"><li>检查本机 <b>PHP 安装点</b>与版本，判断是否低于修复基线</li><li>核查关键配置生效值：upload_progress / fatal_error_backtraces / memory_limit / post_max_size</li><li>扫描近 7 天新增的可疑落地文件，对比常见 webshell 特征</li><li>收集 PHP 派生的 shell 子进程与外联连接</li></ol><div class="row" style="justify-content:center;align-items:center;margin-top:16px"><button class="btn primary" id="h-run2">${ico('play','s12')}立即检测本机</button></div></div></div></div>`;
+  <div id="h-out"><div class="card"><div class="card-b"><div class="empty">${ico('server')}<b>尚未执行本地取证</b><p>只读取证，不修改任何文件；结果会写入资产台账并标记「本地取证」。</p><ol class="steps"><li>检查本机 <b>PHP 安装点</b>与版本，判断是否低于修复基线</li><li>核查关键配置生效值：upload_progress / fatal_error_backtraces / memory_limit / post_max_size</li><li>扫描近 7 天新增的可疑落地文件，对比常见 webshell 特征</li><li>收集 PHP 派生的 shell 子进程与外联连接</li></ol><div class="row" style="justify-content:center;align-items:center;margin-top:16px"><button class="btn primary" id="h-run2">${ico('play','s12')}立即检测本机</button></div></div></div></div>`;
   $('#h-run').onclick=async()=>{
     $('#h-out').innerHTML='<div class="card"><div class="card-b">'+emptyState('clock','检测中…')+'</div></div>';
     try{const j=await api('/api/jobs',{method:'POST',body:{kind:'host'}});

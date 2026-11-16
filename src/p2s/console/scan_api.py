@@ -390,7 +390,7 @@ def api_create_job(body: JobIn) -> dict:
         params["path"] = str(p)
         total = 0
     elif kind == "host":
-        title = "主机侧检测"
+        title = "本地取证"
         params = body.model_dump()
         total = 0
     elif kind == "url":
