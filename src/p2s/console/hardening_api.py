@@ -369,3 +369,57 @@ def _k8s_readme(ns: str, arts) -> str:
               "  · 默认拒绝的网络策略需要按业务补白名单，否则依赖会连不通；",
               "  · readOnlyRootFilesystem 需要应用支持（写缓存请挂 emptyDir）。"]
     return "\n".join(lines) + "\n"
+
+
+@router.get("/api/hardening/overview")
+def api_hardening_overview() -> dict:
+    """加固总览：每台资产的目标文件、待执行动作数、票据与验证状态。
+
+    为什么要这个接口：加固能力此前只藏在"资产台账行内盾牌图标"里，
+    菜单里没有入口 —— 有功能但找不到，等于没有。
+    """
+    rows: list[dict] = []
+    for a in _load_assets():
+        host = str(a.get("host") or "")
+        if not host:
+            continue
+        target = ""
+        actions: list[dict] = []
+        try:
+            target = _target_of(a)
+            if target:
+                actions = _actions_for(a, target)
+        except Exception:
+            actions = []
+        rec = _load_record(host)
+        tk = rec.get("ticket") or {}
+        hr = a.get("host_report") or {}
+        rows.append({
+            "host": host,
+            "device_label": a.get("device_label") or "",
+            "php_version": a.get("php_version") or "",
+            "sapi": a.get("sapi") or "",
+            "target": target,
+            "actions": len(actions),
+            "keys": [x.get("key") for x in actions][:8],
+            "status": a.get("hardening_status") or ("pending" if actions else "none"),
+            "verified_at": a.get("hardening_verified_at") or "",
+            "ticket": tk.get("id") or "",
+            "ticket_used": bool(tk.get("used_at")),
+            "ticket_expires": tk.get("expires_at") or "",
+            "pool_overrides": len([x for x in (hr.get("pool_overrides") or []) if x.get("key")]),
+        })
+
+    # 排序：待加固 → 有票据未用 → 已加固 → 无需加固
+    order = {"pending": 0, "verified": 2, "none": 3}
+    rows.sort(key=lambda r: (order.get(r["status"], 9), -r["actions"], r["host"]))
+    stats = {
+        "total": len(rows),
+        "pending": sum(1 for r in rows if r["status"] == "pending"),
+        "verified": sum(1 for r in rows if r["status"] == "verified"),
+        "none": sum(1 for r in rows if r["status"] == "none"),
+        "with_ticket": sum(1 for r in rows if r["ticket"] and not r["ticket_used"]),
+        "pool_warn": sum(1 for r in rows if r["pool_overrides"]),
+        "rules": len(rulebook.ALL),
+    }
+    return {"rows": rows, "stats": stats}

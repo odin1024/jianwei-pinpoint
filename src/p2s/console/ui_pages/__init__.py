@@ -4,12 +4,12 @@
 函数之间可以继续互相调用，不需要任何模块化改造。
 """
 
-from . import agents, drawer, ioc, logs, ops, overview, php, remediation, reports, rules, tasks
+from . import agents, drawer, harden, ioc, logs, ops, overview, php, remediation, reports, rules, tasks
 
 PARTS: list[str] = [
     overview.PART, tasks.PART, drawer.PART, php.PART,
     logs.PART, rules.PART, ioc.PART, reports.PART,
-    agents.PART, remediation.PART, ops.PART,
+    agents.PART, remediation.PART, harden.PART, ops.PART,
 ]
 
 PAGES = "\n".join(PARTS)

@@ -24,19 +24,20 @@ CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 
 PAGES = [
     ("overview", "态势总览"),
-    ("devices", "设备发现"),
-    ("tasks", "任务中心"),
+    ("discover", "设备发现"),
     ("assets", "资产台账"),
     ("php", "PHP 暴露面"),
     ("logs", "日志分析"),
-    ("agents", "Agent 管理"),
-    ("hostcheck", "主机侧检测"),
+    ("host", "本地取证"),
+    ("harden", "配置加固"),
     ("rules", "规则中心"),
-    ("ioc", "IOC 中心"),
     ("remediation", "整改跟踪"),
+    ("tasks", "任务中心"),
     ("schedule", "计划任务"),
-    ("audit", "审计日志"),
     ("reports", "报告中心"),
+    ("audit", "审计日志"),
+    ("agents", "Agent 管理"),
+    ("ioc", "IOC 库"),
 ]
 
 PROBE = r"""

@@ -2,7 +2,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>见微 Pinpoint · 内网暴露面核查与取证</title>
+<title>见微 Pinpoint · 内网暴露面核查与配置加固</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI3IiBmaWxsPSIjMWQ0ZWQ4Ii8+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwwKSIgY29sb3I9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMi4xIj48cGF0aCBkPSJNNCAxMS41VjYuNUEyLjUgMi41IDAgMCAxIDYuNSA0aDUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjIuMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHBhdGggZD0iTTI4IDExLjVWNi41QTIuNSAyLjUgMCAwIDAgMjUuNSA0aC01IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxwYXRoIGQ9Ik00IDIwLjV2NUEyLjUgMi41IDAgMCAwIDYuNSAyOGg1IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxwYXRoIGQ9Ik0yOCAyMC41djVBMi41IDIuNSAwIDAgMSAyNS41IDI4aC01IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyLjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjE2IiBjeT0iMTYiIHI9IjMuNiIgZmlsbD0iY3VycmVudENvbG9yIi8+PC9nPjwvc3ZnPg==">
 <meta name="color-scheme" content="light dark">
 <meta name="description" content="见微 Pinpoint —— 企业内网 PHP 暴露面发现与合规评估工具">
@@ -53,26 +53,31 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark"><svg width="26" height="26" viewBox="0 0 32 32" fill="none"><path d="M4 11.5V6.5A2.5 2.5 0 0 1 6.5 4h5" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2.2" stroke-linecap="round"/><path d="M28 11.5V6.5A2.5 2.5 0 0 0 25.5 4h-5" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2.2" stroke-linecap="round"/><path d="M4 20.5v5A2.5 2.5 0 0 0 6.5 28h5" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2.2" stroke-linecap="round"/><path d="M28 20.5v5A2.5 2.5 0 0 1 25.5 28h-5" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2.2" stroke-linecap="round"/><circle cx="11" cy="11" r="1.5" fill="currentColor" fill-opacity=".38"/><circle cx="21" cy="11" r="1.5" fill="currentColor" fill-opacity=".38"/><circle cx="11" cy="21" r="1.5" fill="currentColor" fill-opacity=".38"/><circle cx="21" cy="21" r="1.5" fill="currentColor" fill-opacity=".38"/><circle cx="16" cy="16" r="6.2" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-width="1.1"/><circle cx="16" cy="16" r="3.1" fill="currentColor"/></svg></div>
-      <div class="brand-txt"><b>见微 Pinpoint</b><span>内网暴露面核查与取证</span></div>
+      <div class="brand-txt"><b>见微 Pinpoint</b><span>内网暴露面核查与配置加固</span></div>
     </div>
     <nav class="nav">
-      <div class="nav-group">总览</div>
+      <div class="nav-group">核查</div>
       <a href="#overview" data-tab="overview" class="on"><svg class="i"><use href="#i-grid"/></svg>态势总览</a>
       <a href="#discover" data-tab="discover"><svg class="i"><use href="#i-radar"/></svg>设备发现</a>
-      <a href="#tasks" data-tab="tasks"><svg class="i"><use href="#i-clock"/></svg>任务中心<span class="cnt run hide" id="nav-run"></span></a>
       <a href="#assets" data-tab="assets"><svg class="i"><use href="#i-list"/></svg>资产台账<span class="cnt hide" id="nav-assets"></span></a>
-      <div class="nav-group">暴露面</div>
       <a href="#php" data-tab="php"><svg class="i"><use href="#i-alert"/></svg>PHP 暴露面<span class="cnt hide" id="nav-php"></span></a>
       <a href="#logs" data-tab="logs"><svg class="i"><use href="#i-scan"/></svg>日志分析</a>
-      <a href="#agents" data-tab="agents"><svg class="i"><use href="#i-server"/></svg>Agent 管理</a>
-      <a href="#host" data-tab="host"><svg class="i"><use href="#i-server"/></svg>主机侧检测</a>
-      <div class="nav-group">能力</div>
+      <a href="#host" data-tab="host"><svg class="i"><use href="#i-server"/></svg>本地取证</a>
+
+      <div class="nav-group">加固</div>
+      <a href="#harden" data-tab="harden"><svg class="i"><use href="#i-shield"/></svg>配置加固<span class="cnt hide" id="nav-harden"></span></a>
       <a href="#rules" data-tab="rules"><svg class="i"><use href="#i-filter"/></svg>规则中心</a>
-      <a href="#ioc" data-tab="ioc"><svg class="i"><use href="#i-target"/></svg>IOC 中心</a>
       <a href="#remediation" data-tab="remediation"><svg class="i"><use href="#i-check"/></svg>整改跟踪</a>
+
+      <div class="nav-group">运营</div>
+      <a href="#tasks" data-tab="tasks"><svg class="i"><use href="#i-clock"/></svg>任务中心<span class="cnt run hide" id="nav-run"></span></a>
       <a href="#schedule" data-tab="schedule"><svg class="i"><use href="#i-clock"/></svg>计划任务</a>
-      <a href="#audit" data-tab="audit"><svg class="i"><use href="#i-list"/></svg>审计日志</a>
       <a href="#reports" data-tab="reports"><svg class="i"><use href="#i-file"/></svg>报告中心</a>
+      <a href="#audit" data-tab="audit"><svg class="i"><use href="#i-list"/></svg>审计日志</a>
+
+      <div class="nav-group">设置</div>
+      <a href="#agents" data-tab="agents"><svg class="i"><use href="#i-server"/></svg>Agent 管理</a>
+      <a href="#ioc" data-tab="ioc"><svg class="i"><use href="#i-target"/></svg>IOC 库</a>
     </nav>
   </aside>
 
@@ -203,15 +208,16 @@ syncThemeBtn();
 
 /* ==================== 全局状态 & 路由 ==================== */
 const PAGES={
-  overview:{t:'态势总览',s:'CVE-2026-109618 / 109619 专项视图',fn:loadOverview},
+  overview:{t:'态势总览',s:'暴露面核查 · 配置加固 · 持续监控',fn:loadOverview},
   discover:{t:'设备发现',s:'网段 / 批量主机 → 设备类型 → PHP 暴露面',fn:loadDiscover},
   tasks:{t:'任务中心',s:'后台任务：进度、取消、历史',fn:loadTasks},
   assets:{t:'资产台账',s:'设备画像持久化 · 分组 · 责任人',fn:loadAssets},
-  php:{t:'PHP 暴露面',s:'只关注真正跑 PHP 的资产',fn:loadPhp},
+  php:{t:'PHP 暴露面',s:'CVE-2026-109618 / 109619 专项 · 只关注真正跑 PHP 的资产',fn:loadPhp},
   logs:{t:'日志分析',s:'被动检测 · 零风险',fn:loadLogs},
   agents:{t:'Agent 管理',s:'已接入主机 · 上报时间 · 离线判定',fn:loadAgents},
-  host:{t:'主机侧检测',s:'本机配置 / 痕迹 / 进程 / 连接',fn:loadHost},
-  rules:{t:'规则中心',s:'检测规则 · 一键导出',fn:loadRules},
+  host:{t:'本地取证',s:'本机配置 / 痕迹 / 进程 / 连接（只读）',fn:loadHost},
+  harden:{t:'配置加固',s:'生成加固包 · 回执校验 · 一次性票据',fn:loadHarden},
+  rules:{t:'规则中心',s:'检测规则与加固规则 · 一键导出',fn:loadRules},
   ioc:{t:'IOC 中心',s:'在野利用指标库',fn:loadIoc},
   schedule:{t:'计划任务',s:'定时扫描 · 自动入库',fn:loadSchedule},
   audit:{t:'审计日志',s:'所有写操作留痕',fn:loadAudit},
