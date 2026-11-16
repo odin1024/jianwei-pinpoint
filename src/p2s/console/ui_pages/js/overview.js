@@ -24,8 +24,11 @@ async function loadOverview(c){
 
   c.innerHTML=`
   <div class="grid kpis">
-    <div class="kpi ${o.exposed?'primary':'quiet'}"><div class="k">${ico('alert','s12')}暴露待修复</div><div class="v num">${o.exposed}</div>
-      <div class="d">${o.exposed?'版本低于修复基线，需立即处置':'当前无暴露资产'}</div></div>
+    <div class="kpi ${o.exposed?'primary':'quiet'}"><div class="k">${ico('alert','s12')}暴露待修复</div>
+      <div class="v row-v"><span class="num">${o.exposed}</span>
+        <span class="of">/ ${o.php_present||0} 台 PHP 资产</span></div>
+      <div class="mini"><span style="width:${o.php_present?Math.round((o.exposed||0)/(o.php_present)*100):0}%"></span></div>
+      <div class="d">${o.exposed?'版本低于修复基线，需立即处置':'当前无暴露资产'}${o.php_present?` · 占 ${Math.round((o.exposed||0)/(o.php_present)*100)}%`:''}</div></div>
     <div class="kpi ${o.php_present?'':'quiet'}"><div class="k">${ico('code','s12')}含 PHP 资产</div><div class="v num">${o.php_present}</div>
       <div class="d">${o.unknown?`${o.unknown} 台版本待确认`:'版本均已确认'}</div></div>
     <div class="kpi quiet"><div class="k">${ico('check','s12')}已修复</div><div class="v num">${o.patched}</div><div class="d">已达基线版本</div></div>
@@ -97,7 +100,7 @@ async function loadOverview(c){
     <div class="card-h"><h3>最近扫描</h3><div class="sp"></div>
       <button class="btn sm ghost" onclick="location.hash='reports'">全部报告 →</button></div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>扫描 ID</th><th>类型</th><th>风险</th><th>目标</th><th>严重</th><th>高危</th><th>开始时间</th><th></th></tr></thead>
+      <thead><tr><th>扫描 ID</th><th>类型</th><th>风险</th><th>目标</th><th class="num">严重</th><th class="num">高危</th><th>开始时间</th><th></th></tr></thead>
       <tbody>${(()=>{
         // 同类型 + 同风险 + 同一小时内的扫描合并成一行：Agent 反复上报时不再刷屏
         const groups=[];

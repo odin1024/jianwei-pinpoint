@@ -20,8 +20,8 @@ async function loadReports(c){
       <input id="r-search" placeholder="搜索扫描 ID" style="max-width:220px">
     </div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>报告</th><th>类型</th><th>目标</th><th>风险</th><th>发现</th>
-        <th>严重</th><th>高危</th><th>开始</th><th style="width:190px"></th></tr></thead>
+      <thead><tr><th>报告</th><th>类型</th><th>目标</th><th>风险</th><th class="num">发现</th>
+        <th class="num">严重</th><th class="num">高危</th><th>开始</th><th style="width:190px"></th></tr></thead>
       <tbody id="r-body"></tbody>
     </table></div>
     <div class="row" id="r-pager" style="justify-content:flex-end;gap:8px;padding:9px 12px;border-top:1px solid var(--border)"></div>
