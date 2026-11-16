@@ -21,9 +21,8 @@ import sys
 import time
 from datetime import datetime
 
-import httpx
-
 from ..core import hostcheck
+from ..core.httpclient import make_client
 from ..core.report import ScanResult, to_json
 
 _STOP = False
@@ -50,7 +49,7 @@ def post_console(console: str, payload: dict, token: str = "", timeout: float = 
     last: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            with httpx.Client(timeout=timeout, verify=verify_tls) as c:
+            with make_client(timeout=timeout, verify=verify_tls) as c:
                 r = c.post(
                     url,
                     json={"hostname": platform.node(), "data": payload},

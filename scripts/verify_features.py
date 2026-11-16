@@ -7,11 +7,16 @@ from __future__ import annotations
 
 import http.cookiejar
 import json
+import sys
 import urllib.error
 import urllib.request as u
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _console_auth import credentials  # noqa: E402
 
 BASE = "http://127.0.0.1:18080"
-PW = {"username": "admin", "password": "admin@123"}
+PW = credentials()
 PASS, FAIL = [], []
 
 

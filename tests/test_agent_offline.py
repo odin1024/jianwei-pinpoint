@@ -7,8 +7,10 @@ from p2s.console.app import app
 
 
 def _login(c: TestClient) -> None:
-    r = c.post("/api/login", json={"username": "admin", "password": "admin@123"})
-    assert r.status_code in (200, 401)   # 401 时说明环境口令不同，后续用例跳过
+    from p2s.console.deps import ADMIN_PASSWORD, ADMIN_USER
+
+    r = c.post("/api/login", json={"username": ADMIN_USER, "password": ADMIN_PASSWORD})
+    assert r.status_code == 200, "登录必须成功，否则后续断言都在未鉴权状态下空跑"
 
 
 def test_import_offline_report():

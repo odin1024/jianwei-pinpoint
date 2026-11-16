@@ -28,6 +28,7 @@ from .deps import (
     _load_assets,
     _lock,
     _save_assets,
+    signing_secret,
 )
 
 router = APIRouter()
@@ -244,7 +245,7 @@ def api_hardening_receipt(payload: dict) -> dict:
 # --------------------------------------------------------------------------
 def _sign(host: str, action_hash: str, exp: str) -> str:
     msg = f"{host}|{action_hash}|{exp}".encode()
-    return hmac.new(b"p2s-hardening-v1", msg, "sha256").hexdigest()
+    return hmac.new(signing_secret(), msg, "sha256").hexdigest()
 
 
 @router.post("/api/hardening/request")

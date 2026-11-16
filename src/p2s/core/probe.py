@@ -17,6 +17,7 @@ from typing import Optional
 import httpx
 
 from .fingerprint import Fingerprint, fingerprint
+from .httpclient import make_client
 from .versions import Verdict, classify
 
 #: 探针尺寸档位（字节）。刻意保持保守。
@@ -179,7 +180,7 @@ def probe_once(
         result.notes.append(f"未知探针类型 {probe!r}，跳过")
         return result
 
-    with httpx.Client(follow_redirects=False, timeout=timeout, verify=verify_tls) as client:
+    with make_client(follow_redirects=False, timeout=timeout, verify=verify_tls) as client:
         cb = _boundary("ctl")
         c_status, c_len, c_text, _ = _send(client, url, cb, build_control_request(cb), timeout)
         result.control_status = c_status

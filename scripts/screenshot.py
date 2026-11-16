@@ -7,8 +7,12 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 import websocket
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _console_auth import credentials_json  # noqa: E402
 
 PORT = 9340
 BASE = "http://127.0.0.1:18080"
@@ -76,7 +80,7 @@ def main() -> int:
         time.sleep(2.5)
         c.eval("""(async()=>{await fetch('/api/login',{method:'POST',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({username:'admin',password:'admin@123'})});location.href='/'})()""")
+          body:JSON.stringify({__CRED__})});location.href='/'})()""".replace("{__CRED__}", credentials_json()))
         time.sleep(3.5)
         if theme == "dark":
             c.eval("document.documentElement.dataset.theme='dark';'ok'")

@@ -61,10 +61,20 @@ class Verdict:
         return d
 
 
+#: 真正的上游预发布标识。发行版修订号（-1ubuntu1 / -1.el9 / -1kylin1）不在此列，
+#: 它们不改变上游版本序，必须落到正常版本比较，否则 Debian/RHEL/麒麟 上
+#: 一台真 vulnerable 的机器会被误判成「开发分支」而被降级到接近已修复。
+_PRERELEASE_RE = re.compile(r"^(?:RC|alpha|beta|dev|pre|preview)\d*", re.IGNORECASE)
+
+
 def parse_version(raw: str | None) -> Optional[tuple[int, int, int, Optional[str]]]:
     """从任意字符串中提取 PHP 版本号。
 
-    支持 '8.5.12'、'PHP/8.4.27'、'8.3.36-1'、'8.2.35RC1' 等形态。
+    支持 '8.5.12'、'PHP/8.4.27'、'8.3.36-1'、'8.2.35RC1'、
+    '8.2.35-1ubuntu1'、'8.3.36-1.el9'、'8.2.35-1kylin1' 等形态。
+
+    返回的第 4 元素只表示「上游预发布标识」；发行版修订号返回 None，
+    因为它是打包序号，不代表该 PHP 是预发布版本。
     """
     if not raw:
         return None
@@ -72,10 +82,13 @@ def parse_version(raw: str | None) -> Optional[tuple[int, int, int, Optional[str
     if not m:
         return None
     major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    suffix = m.group(4)
-    # RC / alpha / beta 之类预发布标识
-    if suffix and re.match(r"^(RC|alpha|beta|dev)", suffix, re.IGNORECASE):
-        suffix = "RC" if suffix.upper().startswith("RC") else suffix.lower()
+    raw_suffix = m.group(4)
+    suffix: Optional[str] = None
+    if raw_suffix:
+        pm = _PRERELEASE_RE.match(raw_suffix)
+        if pm:
+            token = pm.group(0)
+            suffix = "RC" if token.upper().startswith("RC") else token.lower()
     return major, minor, patch, suffix
 
 

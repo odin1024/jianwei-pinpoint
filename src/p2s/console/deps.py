@@ -17,7 +17,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import HTTPException
 from fastapi.responses import Response
@@ -38,9 +38,12 @@ JOBS = JobManager(DATA_DIR, max_workers=1)
 # --------------------------------------------------------------------------
 # 认证
 #
-# 设计取舍：这是内网单机工具，不引入用户体系与数据库，只做「单口令 + 会话 Cookie」。
-# 没有口令就不许用：未设置 P2S_CONSOLE_PASSWORD 时随机生成并打印到启动日志，
+# 设计取舍：这是内网单机工具，不引入用户体系与数据库，只做「单账号 + 会话 Cookie」。
+# 没有口令就不许用：未显式设置口令时随机生成并打印到启动日志，
 # 宁可让部署者去翻日志，也不留一个裸奔的扫描控制台。
+#
+# 这里绝不能有硬编码兜底口令。控制台掌握扫描发起、加固下发与报告读取，
+# 一旦以 --host 0.0.0.0 部署，任何默认口令都等于把生产处置权限公开。
 # --------------------------------------------------------------------------
 SESSION_COOKIE = "p2s_session"
 SESSION_TTL = 12 * 3600          # 12 小时
@@ -48,17 +51,25 @@ _UNAUTH_OK = {"/login", "/api/login", "/api/health", "/favicon.ico",
               # Agent 用 X-P2S-Token 鉴权，不走会话 Cookie；端点内部自己校验令牌
               "/api/agent/report"}
 
-#: 控制台账号（默认 admin / admin@123，部署时请用环境变量改掉）
+#: 控制台账号名（口令一律走下面的随机生成 / 环境变量，不设默认值）
 ADMIN_USER = os.environ.get("P2S_ADMIN_USER", "admin")
-_ADMIN_PW_ENV = os.environ.get("P2S_ADMIN_PASSWORD") or os.environ.get("P2S_CONSOLE_PASSWORD", "")
-ADMIN_PASSWORD = _ADMIN_PW_ENV or "admin@123"
-_is_default_pw = ADMIN_PASSWORD == "admin@123"
+
+#: 登录口令：显式配置优先，否则每次启动随机生成
 CONSOLE_PASSWORD = os.environ.get("P2S_CONSOLE_PASSWORD", "")
-if not CONSOLE_PASSWORD:
-    CONSOLE_PASSWORD = secrets.token_urlsafe(9)
+_generated_pw = not CONSOLE_PASSWORD
+if _generated_pw:
+    CONSOLE_PASSWORD = secrets.token_urlsafe(12)
+
+#: P2S_ADMIN_PASSWORD 可单独覆盖登录口令；未设时与 CONSOLE_PASSWORD 一致
+_ADMIN_PW_ENV = os.environ.get("P2S_ADMIN_PASSWORD", "")
+ADMIN_PASSWORD = _ADMIN_PW_ENV or CONSOLE_PASSWORD
+
+if _generated_pw:
     print(
-        f"[p2s] 未设置 P2S_CONSOLE_PASSWORD，本次启动口令：{CONSOLE_PASSWORD}\n"
-        f"[p2s] 生产部署请显式设置该环境变量，否则每次重启口令都会变。",
+        f"[p2s] 未设置 P2S_CONSOLE_PASSWORD，本次启动登录凭据：\n"
+        f"[p2s]   用户名：{ADMIN_USER}\n"
+        f"[p2s]   口令  ：{CONSOLE_PASSWORD}\n"
+        f"[p2s] 生产部署请显式设置 P2S_CONSOLE_PASSWORD，否则每次重启口令都会变。",
         file=sys.stderr,
     )
 
@@ -132,11 +143,113 @@ def _credentials_ok(user: str, password: str) -> bool:
 
 
 def _atomic_write(path: Path, text: str) -> None:
-    """先写临时文件再 os.replace —— 进程被杀也不会留下半截 JSON。"""
+    """先写临时文件再 os.replace —— 进程被杀也不会留下半截 JSON。
+
+    临时文件名必须唯一：调度线程和 API 线程会并发写同一个文件，
+    共用固定 .tmp 名会互相覆盖，os.replace 有机会把半截内容搬上正，
+    读方就会解析失败（曾经表现为「计划列表被清空」）。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        # Windows 上目标文件正被别的线程/进程打开时 os.replace 会抛 PermissionError，
+        # 读方（调度线程 load_schedules）恰好开着时就会撞上，重试几次即可。
+        for attempt in range(25):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == 24:
+                    raise
+                time.sleep(0.02)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+_SECRET_FILE = DATA_DIR / ".signing-key"
+_secret_cache: Optional[bytes] = None
+
+
+def signing_secret() -> bytes:
+    """加固令牌的 HMAC 密钥：每套部署独立随机生成并持久化。
+
+    绝不能用源码常量做密钥 —— 令牌内容是「主机名|动作哈希|过期时间」，
+    全部可预测，一旦密钥公开任何人都能离线伪造合法令牌，
+    「一次性令牌 + 白名单」这层授权就完全失效。
+    """
+    global _secret_cache
+    if _secret_cache is not None:
+        return _secret_cache
+    env = os.environ.get("P2S_SIGNING_KEY", "")
+    if env:
+        _secret_cache = env.encode()
+        return _secret_cache
+    try:
+        if _SECRET_FILE.exists():
+            val = _SECRET_FILE.read_text(encoding="utf-8").strip()
+            if val:
+                _secret_cache = val.encode()
+                return _secret_cache
+    except OSError:
+        pass
+    val = secrets.token_urlsafe(48)
+    try:
+        _atomic_write(_SECRET_FILE, val)
+        if os.name != "nt":
+            os.chmod(_SECRET_FILE, 0o600)
+    except OSError:
+        # 落盘失败就只在本次进程内有效，仍然强于固定密钥
+        pass
+    _secret_cache = val.encode()
+    return _secret_cache
+
+
+def validate_webhook_url(url: str) -> None:
+    """校验 Webhook 目标，挡住 SSRF 中真正会越权的那部分。
+
+    本产品本身就是内网扫描器，登录用户当然能访问 RFC1918 地址，
+    因此不禁止私网 Webhook（内网 IM 机器人是正常用法）。
+    必须挡的是两类「扫描功能给不了的能力」：
+      - 链路本地 169.254.0.0/16：云厂商元数据服务，可窃取实例 IAM 凭证
+      - 回环地址：可打到控制台自身或本机 Docker/DB 等未鉴权服务
+    域名会被解析后再判断，避免用 DNS 指向元数据地址绕过。
+    """
+    import socket
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="通知地址格式不合法") from exc
+    if parts.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="通知地址必须以 http:// 或 https:// 开头")
+    host = parts.hostname or ""
+    if not host:
+        raise HTTPException(status_code=400, detail="通知地址缺少主机名")
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"通知地址无法解析：{host}") from exc
+
+    allow_loop = os.environ.get("P2S_ALLOW_LOOPBACK_WEBHOOK", "").lower() in ("1", "true", "yes")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_link_local:
+            raise HTTPException(
+                status_code=400,
+                detail="通知地址不能指向链路本地网段（云元数据服务 169.254.0.0/16）",
+            )
+        if ip.is_loopback and not allow_loop:
+            raise HTTPException(
+                status_code=400,
+                detail="通知地址不能指向回环地址；确需本机回调请设 P2S_ALLOW_LOOPBACK_WEBHOOK=1",
+            )
 
 
 def _load_assets() -> list[dict]:
@@ -153,8 +266,41 @@ def _load_assets() -> list[dict]:
     return []
 
 
+#: 资产里属于「自由文本」的字段：可能承载攻击载荷或敏感回显，落盘前脱敏。
+#: 不能对整个资产对象无差别脱敏 —— redact 会把 40+ 位十六进制当 blob 抹掉，
+#: 而 favicon / asset_fingerprints 正是 SHA256，整体脱敏会直接毁掉指纹。
+_ASSET_TEXT_KEYS = frozenset({
+    "note", "evidence", "errors", "remediation", "banner", "title",
+    "cmdline", "command", "message", "detail", "raw", "snippet", "sample",
+    "reason", "description", "path", "value",
+})
+
+
+def _redact_asset_text(obj):
+    """只对自由文本字段脱敏，结构化标识与哈希保持原样。"""
+    from ..core.redact import redact
+
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k in _ASSET_TEXT_KEYS:
+                if isinstance(v, str):
+                    out[k] = redact(v)
+                    continue
+                if isinstance(v, list):
+                    out[k] = [redact(x) if isinstance(x, str) else _redact_asset_text(x)
+                              for x in v]
+                    continue
+            out[k] = _redact_asset_text(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_asset_text(x) for x in obj]
+    return obj
+
+
 def _save_assets(assets: list[dict]) -> None:
-    _atomic_write(ASSETS_FILE, json.dumps(assets, ensure_ascii=False, indent=2))
+    safe = [_redact_asset_text(a) for a in assets]
+    _atomic_write(ASSETS_FILE, json.dumps(safe, ensure_ascii=False, indent=2))
 
 
 def _resolve_log_path(raw: str) -> Path:
@@ -418,12 +564,13 @@ __all__ = [
     "_UNAUTH_OK",
     "_asset_from_profile",
     "_atomic_write",
+    "signing_secret",
+    "validate_webhook_url",
     "_credentials_ok",
     "_csv_cell",
     "_csv_response",
     "_diff_asset",
     "_expand_cidr",
-    "_is_default_pw",
     "_issue_session",
     "_load_assets",
     "_load_scans",

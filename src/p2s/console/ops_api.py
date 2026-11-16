@@ -21,7 +21,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from .deps import DATA_DIR, _atomic_write
+from .deps import DATA_DIR, _atomic_write, validate_webhook_url
 
 router = APIRouter()
 
@@ -31,6 +31,10 @@ MAX_AUDIT_LINES = 5000
 
 _WRITE_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 _AUDIT_SKIP = {"/api/login", "/api/logout", "/api/agent/report", "/api/scan/logs/upload"}
+
+#: 计划配置的读-改-写必须串行：调度线程与 API 线程各自持有一份快照，
+#: 交错保存会互相覆盖（用户刚改的配置被调度线程的旧快照冲掉）。
+_sched_lock = threading.RLock()
 
 
 # --------------------------------------------------------------------------
@@ -126,13 +130,23 @@ def _new_id() -> str:
 
 
 def load_schedules() -> list[dict]:
-    """读取全部计划；兼容旧的"单条对象"格式，自动迁移成列表。"""
+    """读取全部计划；兼容旧的"单条对象"格式，自动迁移成列表。
+
+    文件损坏时不能当成"没有计划"直接覆盖写回去 —— 那会把用户配置清空。
+    这里先把坏文件改名留证，再返回空列表。
+    """
     raw: Any = {}
     if SCHEDULE_FILE.exists():
         try:
             raw = json.loads(SCHEDULE_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             raw = {}
+            try:
+                broken = SCHEDULE_FILE.with_name(
+                    SCHEDULE_FILE.name + f".corrupt-{datetime.now():%Y%m%d%H%M%S}")
+                SCHEDULE_FILE.replace(broken)
+            except OSError:
+                pass
 
     if isinstance(raw, dict) and isinstance(raw.get("schedules"), list):
         items = raw["schedules"]
@@ -212,8 +226,8 @@ def _validate(payload: dict, base: dict | None = None) -> dict:
         cfg["hosts"] = [str(x).strip() for x in (payload.get("hosts") or []) if str(x).strip()][:1024]
     if not cfg.get("cidr") and not cfg.get("hosts"):
         raise HTTPException(status_code=400, detail="必须填写网段或主机列表")
-    if cfg.get("notify_url") and not str(cfg["notify_url"]).startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="通知地址必须以 http:// 或 https:// 开头")
+    if cfg.get("notify_url"):
+        validate_webhook_url(str(cfg["notify_url"]))
     if not cfg.get("name"):
         cfg["name"] = cfg.get("cidr") or (cfg.get("hosts") or ["未命名计划"])[0]
     return cfg
@@ -232,42 +246,46 @@ def api_list_schedules() -> dict:
 def api_create_schedule(payload: dict) -> dict:
     cfg = _validate(payload)
     cfg["id"] = _new_id()
-    items = load_schedules()
-    items.append(cfg)
-    save_schedules(items)
+    with _sched_lock:
+        items = load_schedules()
+        items.append(cfg)
+        save_schedules(items)
     return cfg
 
 
 @router.patch("/api/schedules/{sid}")
 def api_update_schedule(sid: str, payload: dict) -> dict:
-    items = load_schedules()
-    for i, it in enumerate(items):
-        if it["id"] != sid:
-            continue
-        items[i] = _validate(payload, it)
-        items[i]["id"] = sid
-        save_schedules(items)
-        return items[i]
+    with _sched_lock:
+        items = load_schedules()
+        for i, it in enumerate(items):
+            if it["id"] != sid:
+                continue
+            items[i] = _validate(payload, it)
+            items[i]["id"] = sid
+            save_schedules(items)
+            return items[i]
     raise HTTPException(status_code=404, detail="计划不存在")
 
 
 @router.delete("/api/schedules/{sid}")
 def api_delete_schedule(sid: str) -> dict:
-    items = load_schedules()
-    left = [x for x in items if x["id"] != sid]
-    if len(left) == len(items):
-        raise HTTPException(status_code=404, detail="计划不存在")
-    save_schedules(left)
+    with _sched_lock:
+        items = load_schedules()
+        left = [x for x in items if x["id"] != sid]
+        if len(left) == len(items):
+            raise HTTPException(status_code=404, detail="计划不存在")
+        save_schedules(left)
     return {"ok": True, "total": len(left)}
 
 
 @router.post("/api/schedules/{sid}/run")
 def api_run_schedule(sid: str) -> dict:
-    items = load_schedules()
-    for it in items:
-        if it["id"] == sid:
-            job = _fire(it, items)
-            return {"ok": True, "job": job}
+    with _sched_lock:
+        items = load_schedules()
+        for it in items:
+            if it["id"] == sid:
+                job = _fire(it, items)
+                return {"ok": True, "job": job}
     raise HTTPException(status_code=404, detail="计划不存在")
 
 
@@ -283,15 +301,16 @@ def api_get_schedule() -> dict:
 @router.post("/api/schedule")
 def api_set_schedule(payload: dict) -> dict:
     """旧接口：没有计划就建一条，有则更新第一条。"""
-    items = load_schedules()
-    if not items:
-        cfg = _validate(payload)
-        cfg["id"] = _new_id()
-        items.append(cfg)
-    else:
-        items[0] = _validate(payload, items[0])
-        items[0]["id"] = items[0]["id"] or _new_id()
-    save_schedules(items)
+    with _sched_lock:
+        items = load_schedules()
+        if not items:
+            cfg = _validate(payload)
+            cfg["id"] = _new_id()
+            items.append(cfg)
+        else:
+            items[0] = _validate(payload, items[0])
+            items[0]["id"] = items[0]["id"] or _new_id()
+        save_schedules(items)
     return items[0]
 
 
@@ -322,6 +341,10 @@ def _notify(cfg: dict, job: dict) -> None:
     """任务结束后回调 Webhook（失败不影响调度）。"""
     url = str(cfg.get("notify_url") or "")
     if not url:
+        return
+    try:
+        validate_webhook_url(url)
+    except HTTPException:
         return
     try:
         from urllib.request import Request, urlopen
@@ -370,13 +393,14 @@ def _fire(cfg: dict, items: list[dict] | None = None) -> dict:
             patch = next_retry(cfg, cur.get("state"))
             if patch:
                 cfg.update(patch)
-                items2 = load_schedules()
-                for i, it in enumerate(items2):
-                    if it["id"] == cfg["id"]:
-                        items2[i].update(patch)
-                        items2[i]["last_state"] = str(cur.get("state") or "")
-                        save_schedules(items2)
-                        break
+                with _sched_lock:
+                    items2 = load_schedules()
+                    for i, it in enumerate(items2):
+                        if it["id"] == cfg["id"]:
+                            items2[i].update(patch)
+                            items2[i]["last_state"] = str(cur.get("state") or "")
+                            save_schedules(items2)
+                            break
             if cfg.get("notify_url"):
                 _notify(cfg, cur)
             return
@@ -393,30 +417,31 @@ def start_scheduler() -> None:
     def loop() -> None:
         while True:
             try:
-                items = load_schedules()
-                changed = False
-                now = datetime.now()
-                for it in items:
-                    if not it.get("enabled"):
-                        continue
-                    # 优先处理到点的重试
-                    at = str(it.get("next_retry_at") or "")
-                    if at:
-                        try:
-                            due = datetime.fromisoformat(at)
-                        except ValueError:
-                            due = None
-                        if due and now >= due:
-                            it["next_retry_at"] = ""
+                with _sched_lock:
+                    items = load_schedules()
+                    changed = False
+                    now = datetime.now()
+                    for it in items:
+                        if not it.get("enabled"):
+                            continue
+                        # 优先处理到点的重试
+                        at = str(it.get("next_retry_at") or "")
+                        if at:
+                            try:
+                                due = datetime.fromisoformat(at)
+                            except ValueError:
+                                due = None
+                            if due and now >= due:
+                                it["next_retry_at"] = ""
+                                _fire(it, items)
+                                changed = True
+                                continue
+                            continue                 # 等待重试期间不触发正常周期
+                        if _seconds_until_next(it) <= 0:
                             _fire(it, items)
                             changed = True
-                            continue
-                        continue                 # 等待重试期间不触发正常周期
-                    if _seconds_until_next(it) <= 0:
-                        _fire(it, items)
-                        changed = True
-                if changed:
-                    save_schedules(items)
+                    if changed:
+                        save_schedules(items)
                 maybe_prune()
             except Exception:
                 pass

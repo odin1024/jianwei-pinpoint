@@ -28,6 +28,7 @@ from urllib.parse import urljoin
 
 import httpx
 
+from .httpclient import make_client
 from .identification import Classification, assess_liveness, classify
 from .oui import vendor_for_ip
 from .signatures import BRAND_KEYWORDS
@@ -411,7 +412,7 @@ def _probe_brand_sources(base: str, html: str, timeout: float) -> tuple[set[str]
     _lines: set[str] = set()
     hashes: list[str] = []
     try:
-        with httpx.Client(verify=False, timeout=min(timeout, 6.0), follow_redirects=True) as c:
+        with make_client(timeout=min(timeout, 6.0), follow_redirects=True) as c:
             for url in _asset_refs(html, base):
                 try:
                     r = c.get(url, headers={"User-Agent": UA_LADDER[0]})
@@ -541,7 +542,7 @@ def probe_http(host: str, port: int, *, https: bool = False, timeout: float = 8.
     best_path = "/"
     best_title = False
 
-    with httpx.Client(verify=False, timeout=timeout, follow_redirects=False) as client:
+    with make_client(timeout=timeout, follow_redirects=False) as client:
         for ua in UA_LADDER:
             for path in paths:
                 if time.monotonic() > deadline:
@@ -591,7 +592,7 @@ def probe_http(host: str, port: int, *, https: bool = False, timeout: float = 8.
         loc = best.headers.get("Location") or ""
         if loc:
             try:
-                with httpx.Client(verify=False, timeout=timeout, follow_redirects=True) as rc:
+                with make_client(timeout=timeout, follow_redirects=True) as rc:
                     rr = rc.get(httpx.URL(base).join(loc), headers={"User-Agent": UA_LADDER[0]})
                 rct = rr.headers.get("Content-Type", "")
                 if ("text" in rct or not rct) and rr.status_code < 400:
@@ -610,7 +611,7 @@ def probe_http(host: str, port: int, *, https: bool = False, timeout: float = 8.
         js_target = _js_redirect(body)
         if js_target:
             try:
-                with httpx.Client(verify=False, timeout=timeout, follow_redirects=True) as jc:
+                with make_client(timeout=timeout, follow_redirects=True) as jc:
                     jr = jc.get(httpx.URL(base + "/").join(js_target),
                                 headers={"User-Agent": UA_LADDER[0]})
                 jct = jr.headers.get("Content-Type", "")
@@ -658,7 +659,7 @@ def probe_http(host: str, port: int, *, https: bool = False, timeout: float = 8.
     # 否则每次都会抛 "client has been closed" 被静默吞掉 —— favicon 永远拿不到。
     if favicon:
         try:
-            with httpx.Client(verify=False, timeout=min(timeout, 5.0), follow_redirects=False) as fc:
+            with make_client(timeout=min(timeout, 5.0), follow_redirects=False) as fc:
                 fr = fc.get(f"{base}/favicon.ico", headers={"User-Agent": UA_LADDER[0]})
             if fr.status_code == 200 and fr.content:
                 svc.favicon_sha256, svc.favicon_mmh3 = favicon_fingerprints(fr.content)

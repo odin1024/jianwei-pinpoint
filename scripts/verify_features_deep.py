@@ -10,9 +10,14 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import pathlib
+import sys
 import time
 import urllib.error
 import urllib.request as u
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _console_auth import credentials  # noqa: E402
 
 BASE = "http://127.0.0.1:18080"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -45,7 +50,7 @@ def call(path, data=None, method=None, timeout=60):
         return e.code, e.read().decode("utf-8", "replace")[:200]
 
 
-call("/api/login", {"username": "admin", "password": "admin@123"}, "POST")
+call("/api/login", credentials(), "POST")
 
 print("① 调度线程是否真的会触发")
 # 造一个"早就该跑"的配置，等一个 tick（线程 30s 检查一次）
@@ -67,8 +72,11 @@ check("定时任务被自动创建", fired is not None, (fired or {}).get("title
 if fired:
     check("定时任务归入 auto 分组", (fired.get("params") or {}).get("group") == "auto",
           str((fired.get("params") or {}).get("group")))
+    # schedule.json 是 {"schedules": [...]} 结构，last_job 落在具体那一条上
+    sched = json.loads(SCHED.read_text(encoding="utf-8")).get("schedules", [])
     check("定时任务记录了 last_job",
-          json.loads(SCHED.read_text(encoding="utf-8")).get("last_job") == fired["id"])
+          any(s.get("last_job") == fired["id"] for s in sched),
+          str([s.get("last_job") for s in sched]))
 # 关掉，避免持续触发
 call("/api/schedule", {"enabled": False, "every_minutes": 60, "cidr": "127.0.0.1/32"}, "POST")
 

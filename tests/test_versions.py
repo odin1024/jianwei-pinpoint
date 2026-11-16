@@ -8,7 +8,9 @@ from p2s.core.versions import Status, classify, parse_version
     [
         ("8.5.12", (8, 5, 12, None)),
         ("PHP/8.4.27", (8, 4, 27, None)),
-        ("8.3.36-1", (8, 3, 36, "1")),
+        # 第 4 元素只表示上游预发布标识；'-1' 是发行版打包修订号，不是预发布。
+        # 旧断言期望 '1'，正是把打包号误判成 dev_branch 的根源。
+        ("8.3.36-1", (8, 3, 36, None)),
         ("8.2.35RC1", (8, 2, 35, "RC")),
         ("garbage", None),
         (None, None),

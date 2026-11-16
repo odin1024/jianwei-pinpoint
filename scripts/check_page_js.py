@@ -10,8 +10,13 @@ import json
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _console_auth import credentials  # noqa: E402
 
 BASE = "http://127.0.0.1:18080"
 NODE = r"C:\Users\<用户名>\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
@@ -22,7 +27,7 @@ def fetch_html() -> str:
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
     op.open(urllib.request.Request(
         BASE + "/api/login",
-        data=json.dumps({"username": "admin", "password": "admin@123"}).encode(),
+        data=json.dumps(credentials()).encode(),
         headers={"Content-Type": "application/json"}, method="POST"))
     return op.open(BASE + "/", timeout=20).read().decode("utf-8", "replace")
 

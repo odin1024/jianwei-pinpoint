@@ -47,8 +47,45 @@ def _b64(s: str) -> str:
     return base64.b64encode(s.encode("utf-8")).decode("ascii")
 
 
+#: 平台地址只允许协议 + 主机 + 端口 + 简单路径。
+#: 生成物是要在生产主机上执行的 sh / PowerShell 脚本，任何引号、$、反引号、
+#: 反斜杠或换行都可能突破字符串字面量变成命令，因此这里用白名单而非转义。
+_SAFE_BASE_URL_RE = re.compile(r"^https?://[A-Za-z0-9._\-\[\]:]+(?:/[A-Za-z0-9._\-/]*)?$")
+
+#: 控制字符（换行、回车、制表…）。令牌里出现它们会结束脚本里的那一行，
+#: 后面的内容直接变成命令 —— 这是唯一必须拒绝的情况。
+_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _check_base_url(base_url: str) -> None:
+    if not _SAFE_BASE_URL_RE.match(base_url or ""):
+        raise ValueError(
+            "平台地址不合法：只允许 http(s):// 主机[:端口][/路径]，"
+            "且不得包含引号、空白或 shell 元字符"
+        )
+
+
+def _check_token(token: str) -> None:
+    """令牌是管理员自定的口令，符号可以很杂，但绝不能跨行。"""
+    if token and _CTRL_RE.search(token):
+        raise ValueError("令牌不能包含控制字符或换行")
+
+
+def _sh_escape(s: str) -> str:
+    """POSIX sh 双引号内的转义：\\ " ` $ 会被 shell 解释。"""
+    return (s.replace("\\", "\\\\").replace('"', '\\"')
+             .replace("`", "\\`").replace("$", "\\$"))
+
+
+def _ps_escape(s: str) -> str:
+    """PowerShell 双引号内的转义：` 是转义符，$ 会触发变量插值。"""
+    return s.replace("`", "``").replace('"', '`"').replace("$", "`$")
+
+
 def render_linux(base_url: str, token: str) -> str:
     """生成 POSIX shell 采集脚本。"""
+    _check_base_url(base_url)
+    _check_token(token)
     ini_keys = " ".join(INI_KEYS)
     return f"""#!/bin/sh
 # ==========================================================================
@@ -64,7 +101,9 @@ def render_linux(base_url: str, token: str) -> str:
 #       依赖：sh、sed/awk；上报用 curl 或 wget（任一存在即可）
 # ==========================================================================
 BASE_URL="${{P2S_URL:-{base_url}}}"
-TOKEN="${{P2S_TOKEN:-{token}}}"
+# 令牌默认值单独一个变量：写进参数展开默认值里时，默认值里的右花括号会提前结束展开
+_P2S_TOKEN_DEFAULT="{_sh_escape(token)}"
+TOKEN="${{P2S_TOKEN:-$_P2S_TOKEN_DEFAULT}}"
 DRY=0
 OUT=""
 while [ $# -gt 0 ]; do
@@ -249,6 +288,8 @@ fi
 
 def render_windows(base_url: str, token: str) -> str:
     """生成 Windows PowerShell 采集脚本（PS 5.1 兼容）。"""
+    _check_base_url(base_url)
+    _check_token(token)
     ini_list = ",".join(f'"{k}"' for k in INI_KEYS)
     return f"""# ==========================================================================
 # p2s 主机侧采集脚本（Windows）—— 只读，不修改任何系统配置
@@ -268,7 +309,7 @@ param(
 )
 
 if (-not $BaseUrl) {{ $BaseUrl = "{base_url}" }}
-if (-not $Token)   {{ $Token   = "{token}" }}
+if (-not $Token)   {{ $Token   = "{_ps_escape(token)}" }}
 
 $ErrorActionPreference = "Continue"
 # 中文 Windows 控制台默认 GBK，先切到 UTF-8，否则中文全是乱码

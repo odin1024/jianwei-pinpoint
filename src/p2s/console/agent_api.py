@@ -347,7 +347,12 @@ def api_agent_download(request: Request, os: str = "linux", base: str = "") -> R
     meta = agentkit.KINDS[os]
     # 默认用当前访问地址；反向代理场景可用 ?base=https://p2s.corp.local 覆盖
     host_url = (base or str(request.base_url)).rstrip("/")
-    text = agentkit.render(os, host_url, AGENT_TOKEN)
+    try:
+        text = agentkit.render(os, host_url, AGENT_TOKEN)
+    except ValueError as exc:
+        # base 是用户可控参数，且会被拼进要在生产主机上执行的脚本，
+        # 非法输入必须拒绝生成，不能生成一份带注入的脚本让运维去跑。
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(
         content=text,
         media_type=meta["content_type"],

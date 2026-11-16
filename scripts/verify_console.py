@@ -17,6 +17,9 @@ from pathlib import Path
 
 import httpx
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _console_auth import credentials  # noqa: E402
+
 RESULTS: list[tuple[bool, str, str]] = []
 
 
@@ -27,9 +30,15 @@ def check(ok: bool, name: str, detail: str = "") -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:18080")
+    # 口令来源：--password > P2S_ADMIN_PASSWORD > P2S_CONSOLE_PASSWORD
+    # 1.0.5 起控制台不再有内置默认口令，脚本必须显式拿到凭据（此前这里只认
+    # --password，而文档写的是环境变量，导致按文档跑会静默 401、只跑 6 项就退出）
     ap.add_argument("--password", default="")
     ap.add_argument("--sample", default=str(Path(__file__).resolve().parent.parent / "examples" / "access.log.sample"))
     args = ap.parse_args()
+
+    if not args.password:
+        args.password = credentials()["password"]
 
     base = args.base.rstrip("/")
     with httpx.Client(base_url=base, timeout=30.0, follow_redirects=False) as c:

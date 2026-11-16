@@ -154,15 +154,17 @@ python -m p2s.cli logs --file examples\access.log.sample --report reports\
 # 主机侧检测
 python -m p2s.cli host --report reports\
 
-# Web 控制台（首次访问需要口令）
+# Web 控制台（首次访问需要登录）
 $env:P2S_CONSOLE_PASSWORD = "换成你的口令"
 python -m p2s.cli serve --port 18080
-# 浏览器打开 http://127.0.0.1:18080 → 跳转登录页 → 输入口令
+# 浏览器打开 http://127.0.0.1:18080 → 登录页 → admin / 上面设置的口令
 ```
 
 > 未设置 `P2S_CONSOLE_PASSWORD` 时，控制台会随机生成一个口令并打印在启动日志里，
-> 每次重启都会变；正式部署请显式设置该环境变量。
+> 每次重启都会变；正式部署请显式设置该环境变量。**没有内置默认口令。**
+> 用户名默认 `admin`（`P2S_ADMIN_USER` 可改）；`P2S_ADMIN_PASSWORD` 若设置则优先于控制台口令。
 > Agent 上报用的令牌是 `P2S_AGENT_TOKEN`（缺省复用控制台口令）。
+> 加固令牌签名密钥由 `P2S_SIGNING_KEY` 指定，缺省在数据目录持久化一个随机密钥。
 
 **后台常驻启动（Windows）**
 
@@ -283,14 +285,13 @@ php2shell-sentinel/
 │   │   └── report.py          # JSON / Markdown / HTML 报告
 │   ├── console/app.py         # FastAPI Web 控制台
 │   └── agent/agent.py         # 主机侧 Agent
-├── tests/                     # 40 个测试
+├── tests/                     # 472 个测试
 ├── scripts/
 │   └── check_payload_literals.py   # 载荷字面量守护检查
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── PLATFORMS.md
 │   └── DEPLOY-CUSTOMER.md
-├── deploy/                    # 客户交付物料
 ├── examples/                  # 示例日志与主机列表
 ├── Dockerfile / docker-compose.yml
 └── .github/workflows/ci.yml    # 三平台 CI

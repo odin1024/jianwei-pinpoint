@@ -10,6 +10,10 @@ import json
 import sys
 import urllib.request
 from html.parser import HTMLParser
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _console_auth import credentials  # noqa: E402
 
 BASE = "http://127.0.0.1:18080"
 
@@ -52,7 +56,7 @@ def fetch(path: str = "/") -> str:
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
     op.open(urllib.request.Request(
         BASE + "/api/login",
-        data=json.dumps({"username": "admin", "password": "admin@123"}).encode(),
+        data=json.dumps(credentials()).encode(),
         headers={"Content-Type": "application/json"}, method="POST"))
     return op.open(BASE + path, timeout=20).read().decode("utf-8", "replace")
 

@@ -11,8 +11,12 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 import websocket
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _console_auth import credentials_json  # noqa: E402
 
 PORT = 9360
 BASE = "http://127.0.0.1:18080"
@@ -127,7 +131,7 @@ def main() -> int:
         time.sleep(3)
         c.ev(f"""fetch('{BASE}/api/login',{{method:'POST',
              headers:{{'Content-Type':'application/json'}},
-             body:JSON.stringify({{username:'admin',password:'admin@123'}})}}).then(r=>r.status)""", True)
+             body:JSON.stringify({credentials_json()})}}).then(r=>r.status)""", True)
         c.call("Page.navigate", url=BASE)
         time.sleep(3)
 
