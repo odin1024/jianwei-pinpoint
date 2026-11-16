@@ -125,6 +125,10 @@ svg.i.s18{width:18px;height:18px;flex:0 0 18px}
 /* 指标行：主指标跨 2 列并放大到 32px —— 一屏只留一个视觉重心 */
 .kpis{background:transparent;border:0;box-shadow:none;overflow:visible;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:16px}
 .kpi.primary{grid-column:span 2}
+/* hero：需要放大但**不是风险**的指标（如版本号），用中性强调而非红条 */
+.kpi.hero{grid-column:span 2;border-left:2px solid var(--text)}
+.kpi.hero .v{font-size:var(--fs-xl);line-height:1.1;font-weight:650}
+.kpi.hero .k{text-transform:uppercase;letter-spacing:.08em;font-weight:600}
 .kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:none;padding:12px 14px);border-radius:var(--r-lg);padding:12px 13px}
 .kpi .k{font-size:var(--fs-xs);color:var(--text-3);font-weight:500;letter-spacing:.01em;display:flex;align-items:center;gap:5px;line-height:1.2;display:flex;align-items:center;gap:5px}
 .kpi .v{font-size:var(--fs-l);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:3px;line-height:1.15}
@@ -358,6 +362,8 @@ table:has(#au-body) th:last-child,table:has(#au-body) td:last-child{width:70px;t
 
 /* 内容很少的页面（计划任务/日志来源）限制最大宽度，避免横向拉散 */
 .page-narrow{max-width:880px;margin:0 auto}
+/* 全宽容器：与其它页保持同一栅格，避免"这页看着比别的窄" */
+.page-full{max-width:none;margin:0}
 .recent-tbl th:nth-child(2),.recent-tbl td:nth-child(2){width:120px}
 .recent-tbl th:nth-child(7),.recent-tbl td:nth-child(7){width:104px;text-align:right}
 .recent-tbl th:last-child,.recent-tbl td:last-child{width:64px;text-align:right}

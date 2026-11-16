@@ -69,7 +69,7 @@ async function loadSchedule(c){
   };
 
   c.innerHTML=`
-  <div class="page-narrow"><div class="page-head"><div><h2>计划任务</h2>
+  <div class="page-full"><div class="page-head"><div><h2>计划任务</h2>
     <p>多条计划并存 · 各自独立间隔与分组 · 与手动扫描走完全相同的任务路径</p></div></div>
 
   <div class="card">

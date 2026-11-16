@@ -38,6 +38,7 @@ PAGES = [
     ("audit", "审计日志"),
     ("agents", "Agent 管理"),
     ("ioc", "IOC 库"),
+    ("about", "关于"),
 ]
 
 PROBE = r"""

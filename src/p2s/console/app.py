@@ -95,6 +95,62 @@ def login_page() -> str:
     return LOGIN_HTML
 
 
+@app.get("/api/about")
+def api_about() -> dict:
+    """关于页数据：版本、覆盖范围、能力清单、数据位置、使用边界。
+
+    刻意只返回**可核对的事实**（版本号、规则条数、路径），不放宣传语。
+    """
+    import platform as _pf
+    import sys as _sys
+
+    from .. import __version__
+    from ..core import rulebook
+    from .deps import DATA_DIR, SCANS_DIR
+
+    st = rulebook.stats()
+    scans = len(list(SCANS_DIR.glob("*.json"))) if SCANS_DIR.exists() else 0
+    assets = 0
+    try:
+        ap = DATA_DIR / "assets.json"
+        if ap.exists():
+            assets = len(json.loads(ap.read_text(encoding="utf-8")))
+    except Exception:
+        assets = 0
+
+    return {
+        "product": "见微 Pinpoint",
+        "tagline": "PHP2Shell 暴露面核查与加固",
+        "version": __version__,
+        "runtime": {
+            "python": _pf.python_version(),
+            "platform": _pf.platform(),
+            "frozen": bool(getattr(_sys, "frozen", False)),
+        },
+        "scope": {
+            "cves": ["CVE-2026-109618", "CVE-2026-109619"],
+            "fixed_releases": {"8.5": "8.5.12", "8.4": "8.4.27",
+                               "8.3": "8.3.36", "8.2": "8.2.35"},
+            "layers": ["PHP ini", "PHP-FPM", "Web 服务器", "systemd", "Kubernetes"],
+        },
+        "rules": st,
+        "data": {"dir": str(DATA_DIR), "assets": assets, "scans": scans},
+        "capabilities": [
+            {"k": "发现", "v": "端口/协议/指纹/设备识别，证据分 T1/T2/T3 三级"},
+            {"k": "判定", "v": "四分支基线 + 补丁标记指纹 + changelog 回移，冲突降级为未知"},
+            {"k": "加固", "v": "生成加固包 → 人工执行 → 回执校验；一次性票据 + 计划指纹防篡改"},
+            {"k": "取证", "v": "Agent 只读采集安装点/生效配置/痕迹/进程/连接"},
+            {"k": "监控", "v": "多条定时计划、失败重试、Webhook 通知"},
+        ],
+        "boundaries": [
+            "平台不主动扫描任何外部地址，只扫描你填写的内网目标",
+            "平台不直连业务主机执行命令：加固以「包」交付，由你在目标机执行",
+            "配置加固是风险缓解，**不等于修复**；唯一完整修复是升级到修复版本",
+            "存储态写入成功 ≠ 运行时生效：必须重启服务并用 phpinfo / 业务请求确认",
+        ],
+    }
+
+
 @app.post("/api/login")
 def api_login(body: LoginIn) -> Response:
     if not _credentials_ok(body.username, body.password):

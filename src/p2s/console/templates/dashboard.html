@@ -78,6 +78,7 @@
       <div class="nav-group">设置</div>
       <a href="#agents" data-tab="agents"><svg class="i"><use href="#i-server"/></svg>Agent 管理</a>
       <a href="#ioc" data-tab="ioc"><svg class="i"><use href="#i-target"/></svg>IOC 库</a>
+      <a href="#about" data-tab="about"><svg class="i"><use href="#i-grid"/></svg>关于</a>
     </nav>
   </aside>
 
@@ -223,6 +224,7 @@ const PAGES={
   audit:{t:'审计日志',s:'所有写操作留痕',fn:loadAudit},
   remediation:{t:'整改跟踪',s:'处置状态 · 责任人 · 复扫联动',fn:loadRemediation},
   reports:{t:'报告中心',s:'历史扫描与交付报告',fn:loadReports},
+  about:{t:'关于',s:'产品定位 · 覆盖范围 · 使用边界',fn:loadAbout},
 };
 const S={assets:[],jobs:[],timer:null};
 const STATE={overview:null};   // 侧栏摘要与概览共用，避免重复请求

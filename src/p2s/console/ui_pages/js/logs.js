@@ -16,7 +16,7 @@ async function dupGuard(kind,label){
 
 async function loadLogs(c){
   c.innerHTML=`
-  <div class="page-narrow"><div class="page-head">
+  <div class="page-full"><div class="page-head">
 <div><h2>日志分析</h2><p>被动检测，零风险 · 支持 CLF / JSON / KV 三种格式自动识别</p></div></div>
   <div class="card" style="margin-bottom:12px">
     <div class="card-h"><h3>日志来源</h3></div>
