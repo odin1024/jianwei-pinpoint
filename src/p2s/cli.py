@@ -354,6 +354,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-fallback", action="store_true", help="端口被占用时直接报错，不自动顺延")
     sp.set_defaults(func=cmd_serve)
 
+    sp = sub.add_parser("prune", help="清理历史扫描与上传文件（默认只预览，不删除）")
+    sp.add_argument("--apply", action="store_true", help="真正删除；不加则只统计")
+    sp.add_argument("--keep", type=int, default=3, help="同一输入保留份数（默认 3）")
+    sp.add_argument("--days", type=int, default=7, help="只删早于 N 天的重复报告（默认 7）")
+    sp.add_argument("--max", dest="max_total", type=int, default=300, help="扫描总数上限（默认 300）")
+    sp.add_argument("--upload-days", type=int, default=7, help="上传文件保留天数（默认 7）")
+    sp.set_defaults(func=cmd_prune)
+
     # 与 p2s-agent 等价：刚安装完还没重新生成 entry point 时也能跑
     sp = sub.add_parser("agent", help="主机侧 Agent（等同 p2s-agent）")
     sp.add_argument("agent_args", nargs=argparse.REMAINDER,
@@ -366,6 +374,23 @@ def cmd_agent(args: argparse.Namespace) -> int:
     from .agent import agent as agent_mod
 
     return agent_mod.main(list(args.agent_args))
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    """清理历史扫描与上传文件；默认只预览。"""
+    from .core.retention import default_data_dir, prune_scans, prune_uploads
+
+    data = default_data_dir()
+    r = prune_scans(data / "scans", keep=args.keep, min_age_days=args.days,
+                    apply=args.apply, max_total=args.max_total)
+    u = prune_uploads(data / "uploads", max_age_days=args.upload_days, apply=args.apply)
+    mode = "已删除" if args.apply else "可删除（预览，加 --apply 才真删）"
+    print(f"扫描报告：重复清理 {r['removed']} 组，超上限裁剪 {r.get('capped', 0)} 份，"
+          f"保留分组 {r['kept_groups']}（keep={args.keep}, days={args.days}, "
+          f"max={args.max_total}）")
+    print(f"上传文件：{u['removed']} / {u['scanned']} 个超过 {args.upload_days} 天")
+    print(f"模式：{mode}")
+    return 0
 
 
 def _ensure_utf8_console() -> None:

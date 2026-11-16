@@ -292,11 +292,15 @@ def test_concurrent_atomic_write_keeps_file_parseable(tmp_path):
 
     def reader() -> None:
         for _ in range(60):
-            if target.exists():
-                try:
+            try:
+                if target.exists():
                     _json.loads(target.read_text(encoding="utf-8"))
-                except _json.JSONDecodeError as exc:
-                    errors.append(f"读到半截 JSON: {exc}")
+            except PermissionError:
+                # Windows 语义：读句柄与 os.replace 撞车会返回 EACCES（共享冲突）。
+                # 这是瞬时窗口，不代表文件坏了 —— 真正要断言的是"读到时永远是完整 JSON"。
+                continue
+            except _json.JSONDecodeError as exc:
+                errors.append(f"读到半截 JSON: {exc}")
 
     ts = [threading.Thread(target=writer) for _ in range(4)]
     ts.append(threading.Thread(target=reader))

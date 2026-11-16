@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import json
-import pathlib
 import threading
 import time
 import uuid
@@ -21,6 +20,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from ..core import retention
 from .deps import DATA_DIR, _atomic_write, validate_webhook_url
 
 router = APIRouter()
@@ -494,32 +494,19 @@ def api_scan_duplicate(kind: str = "logs", label: str = "", hours: int = 24) -> 
 # 保守策略：同一内容指纹只保留最新 keep 份；且**只清理超过 min_age_days 天的旧报告**，
 # 当天刚跑出来的一律不动。默认 keep=3 天=7，可用环境变量调整；P2S_AUTO_PRUNE=0 关闭。
 # --------------------------------------------------------------------------
-def prune_scan_files(keep: int = 3, min_age_days: int = 7, apply: bool = True) -> dict:
+def prune_scan_files(keep: int = 3, min_age_days: int = 7, apply: bool = True,
+                     max_total: int = 0) -> dict:
+    """保留策略委托给 core.retention（单一实现，CLI 与接口共用）。"""
+    from .deps import SCANS_DIR
 
-    from .deps import SCANS_DIR, _scan_dedupe_key
+    return retention.prune_scans(SCANS_DIR, keep=keep, min_age_days=min_age_days,
+                                 max_total=max_total, apply=apply)
 
-    if not SCANS_DIR.exists():
-        return {"removed": 0, "kept_groups": 0}
-    groups: dict[str, list[tuple[float, pathlib.Path]]] = {}
-    for f in SCANS_DIR.glob("*.json"):
-        try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        groups.setdefault(_scan_dedupe_key(d), []).append((f.stat().st_mtime, f))
 
-    removed = 0
-    for files in groups.values():
-        files.sort(reverse=True)                      # 最新在前
-        for mtime, f in files[keep:]:
-            if (time.time() - mtime) / 86400 < min_age_days:
-                continue                              # 新报告不动
-            removed += 1
-            if apply:
-                for ext in (".json", ".md", ".html"):
-                    (f.parent / (f.stem + ext)).unlink(missing_ok=True)
-    return {"removed": removed, "kept_groups": len(groups),
-            "keep": keep, "min_age_days": min_age_days}
+def prune_uploads(max_age_days: int = 7, apply: bool = True) -> dict:
+    from .deps import UPLOAD_DIR
+
+    return retention.prune_uploads(UPLOAD_DIR, max_age_days=max_age_days, apply=apply)
 
 
 _LAST_PRUNE = {"ts": 0.0}
@@ -537,8 +524,10 @@ def maybe_prune() -> None:
     try:
         keep = int(os.environ.get("P2S_PRUNE_KEEP", "3"))
         days = int(os.environ.get("P2S_PRUNE_DAYS", "7"))
-        r = prune_scan_files(keep=keep, min_age_days=days)
-        if r["removed"]:
+        cap = int(os.environ.get("P2S_PRUNE_MAX", "300"))
+        r = prune_scan_files(keep=keep, min_age_days=days, max_total=cap)
+        prune_uploads(max_age_days=int(os.environ.get("P2S_UPLOAD_DAYS", "7")))
+        if r["removed"] or r.get("capped"):
             record_audit("POST", "/api/_prune", 200, "system", "127.0.0.1")
     except Exception:
         pass
