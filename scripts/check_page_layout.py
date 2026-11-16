@@ -121,6 +121,27 @@ FORM_ROW_PROBE = r"""
 """
 
 
+DIALOG_PROBE = r"""
+(() => {
+  const m = document.querySelector('.modal');
+  const bg = document.querySelector('.modal-bg');
+  if (!m) return JSON.stringify({found:false});
+  const cs = getComputedStyle(m);
+  const r = m.getBoundingClientRect();
+  return JSON.stringify({
+    found: true,
+    cls: m.className,
+    display: cs.display,
+    width: Math.round(r.width),
+    height: Math.round(r.height),
+    visible: r.width > 100 && r.height > 40 && cs.display !== 'none',
+    bgOn: bg ? getComputedStyle(bg).display : '-',
+    inputs: m.querySelectorAll('input,select,textarea').length
+  });
+})()
+"""
+
+
 def launch() -> subprocess.Popen:
     profile = pathlib.Path.home() / "AppData/Local/Temp/cdp-layout"
     return subprocess.Popen(
@@ -222,6 +243,26 @@ def main() -> int:
         if fr["misaligned"]:
             for bad in fr["misaligned"][:3]:
                 fails.append(f"表单行底边错位 {bad['spread']}px：{bad['text']}")
+
+        # ---- 弹窗：点开「新增计划」必须真的看得见 ----
+        c.ev("void go('schedule')")
+        time.sleep(2.0)
+        c.ev("(()=>{const b=document.querySelector('#sc-add'); if(b)b.click(); return !!b})()")
+        time.sleep(1.2)
+        dlg = json.loads(c.ev(DIALOG_PROBE))
+        print("弹窗:", json.dumps(dlg, ensure_ascii=False))
+        if not dlg.get("found"):
+            fails.append("排程弹窗：点击后没有生成 .modal 节点")
+        else:
+            if not dlg["visible"]:
+                fails.append(f"排程弹窗不可见（display={dlg['display']}, "
+                             f"{dlg['width']}x{dlg['height']}）—— 遮罩出现但内容没显示")
+            if dlg["width"] < 600:
+                fails.append(f"排程弹窗宽度只有 {dlg['width']}px，wide 样式未生效")
+            if dlg["inputs"] < 5:
+                fails.append(f"排程弹窗只有 {dlg['inputs']} 个输入控件，内容可能没渲染")
+        c.ev("(()=>{const b=document.querySelector('#sd-cancel'); if(b)b.click(); return true})()")
+        time.sleep(0.5)
 
         # ---- 窄屏：1200px 下不应出现横向溢出 ----
         c.call("Emulation.setDeviceMetricsOverride", width=1200, height=900,

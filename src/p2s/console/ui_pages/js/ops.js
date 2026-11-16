@@ -158,7 +158,7 @@ async function loadSchedule(c){
 function scheduleDialog(item, done){
   const it=item||{enabled:true,every_minutes:60,cidr:'',group:'auto',save:true,notify_url:''};
   const bg=document.createElement('div'); bg.className='modal-bg on';
-  const box=document.createElement('div'); box.className='modal wide';
+  const box=document.createElement('div'); box.className='modal wide on';
   box.innerHTML=`<h3>${item?'编辑计划':'新增计划'}</h3>
     <div class="mbody">
       <div class="field" style="margin-bottom:10px"><label>名称（可选）</label>
@@ -180,8 +180,10 @@ function scheduleDialog(item, done){
           <input id="sd-retry" type="number" min="0" max="5" value="${esc(String(it.retry_max??1))}"></div>
         <div class="field" style="flex:0 0 160px"><label>重试间隔（分钟）</label>
           <input id="sd-delay" type="number" min="1" max="1440" value="${esc(String(it.retry_delay_minutes??5))}"></div>
-        <div class="hint" style="flex:1;align-self:center;padding-top:14px">
-          任务失败后按此间隔再跑，最多重试 N 次；0 表示不重试</div>
+      </div>
+      <div class="hint" style="margin:-4px 0 10px">
+        任务失败后按此间隔再跑，最多重试 N 次；0 表示不重试</div>
+      <div hidden>
       </div>
       <label class="check" style="margin-bottom:8px"><input type="checkbox" id="sd-save" ${it.save!==false?'checked':''}>
         <span>结果写入资产台账</span></label>

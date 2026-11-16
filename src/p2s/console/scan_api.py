@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from ..core import discovery, hostcheck, identification, logscan
 from ..core import report as report_mod
 from ..core.rules import coverage_report
+from .agent_api import _ingest_host_report
 from .deps import *  # noqa: F401,F403
 
 router = APIRouter()

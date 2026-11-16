@@ -342,7 +342,7 @@ table:has(#r-body) td:last-child{white-space:nowrap;width:150px;text-align:right
 /* 报告格式：三个小链接做成紧凑分组，避免挤占列宽 */
 .fmt-l{display:inline-block;padding:2px 8px;font-size:11px;white-space:nowrap;color:var(--text-2);border:1px solid var(--border);border-radius:3px;text-decoration:none;margin-left:4px;transition:.12s}
 .fmt-l:hover{color:var(--accent);border-color:var(--accent-border);background:var(--accent-soft)}
-.modal.wide{max-width:760px}
+.modal.wide{width:min(760px,92vw);max-width:760px}
 .hd-list{border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .hd-item{padding:10px 12px;border-bottom:1px solid var(--border)}
 .hd-item:last-child{border-bottom:0}
