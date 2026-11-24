@@ -48,16 +48,18 @@ guard:
 # ── 与 CI 的 test / contract / agent-scripts 三个 job 等价 ──────────────
 # 不需要浏览器，任何机器都能跑；密码用测试固定值，不受 shell 环境影响
 verify:
-	@echo "=== 1/5 代码风格 ==="
+	@echo "=== 1/6 代码风格 ==="
 	$(PY) -m ruff check src tests scripts
-	@echo "=== 2/5 单元测试 ==="
+	@echo "=== 2/6 单元测试 ==="
 	$(PY) -m pytest -q
-	@echo "=== 3/5 载荷守护 ==="
+	@echo "=== 3/6 载荷守护 ==="
 	$(PY) scripts/check_payload_literals.py .
-	@echo "=== 4/5 采集脚本语法（Linux/Windows 双平台）==="
+	@echo "=== 4/6 采集脚本语法（Linux/Windows 双平台）==="
 	$(PY) -m pytest tests/test_agent_script.py -q
-	@echo "=== 5/5 版本与规则库一致性 ==="
+	@echo "=== 5/6 版本与规则库一致性 ==="
 	$(PY) -m pytest tests/test_version.py tests/test_rulebook.py -q
+	@echo "=== 6/6 文档数字与代码一致 ==="
+	$(PY) -m pytest tests/test_doc_freshness.py tests/test_benchmark.py -q
 	@echo "全部通过。"
 
 # ── 与 CI 的 ui-gates job 等价（需先 make console）────────────────────

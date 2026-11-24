@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "p2s"
-version = "1.5.0"
+version = "1.5.1"
 description = "php2shell (CVE-2026-109618 / CVE-2026-109619) detection & exposure assessment toolkit"
 readme = "README.md"
 # 真实下限由依赖决定：starlette 1.10 需 >=3.11，fastapi/pydantic/pytest 需 >=3.10。
 # 原写 ">=3.9" 未经验证（锁定的依赖装不上 3.9），已按实测修正。
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
-authors = [{ name = "p2s contributors" }]
+authors = [{ name = "见微 Pinpoint contributors" }]
 keywords = ["php", "security", "cve-2026-109618", "cve-2026-109619", "php2shell", "vulnerability-detection"]
 
 # 核心只依赖 httpx：规则库是 Python 数据、报告是字符串模板，

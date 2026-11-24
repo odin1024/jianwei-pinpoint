@@ -1,0 +1,41 @@
+见微 Pinpoint
+Copyright 2026 见微 Pinpoint contributors
+
+本产品包含或引用了以下第三方内容，其版权归各自所有者。
+
+=========================================================================
+一、运行依赖（Python 包，按各自许可证分发）
+=========================================================================
+
+  httpx                  BSD-3-Clause
+  fastapi                MIT
+  starlette               BSD-3-Clause
+  uvicorn                BSD-3-Clause
+  pydantic / pydantic-core  MIT
+  python-multipart       Apache-2.0
+  pytest                 MIT
+  ruff                   MIT
+  websocket-client       Apache-2.0
+
+完整版本见 `app/requirements.lock.txt`。
+
+=========================================================================
+二、漏洞情报与证据材料
+=========================================================================
+
+`docs/03-情报/证据/` 下的原始证据（NVD JSON、PHP 官方 NEWS、php-src 公告）
+来自各自公开渠道，**仅作事实性引用**，版权归原发布方：
+
+  · NVD（美国国家漏洞数据库）            https://nvd.nist.gov/
+  · PHP 官方（php.net / github.com/php）  https://www.php.net/
+  · CISA KEV 目录                        https://www.cisa.gov/known-exploited-vulnerabilities
+
+这些材料用于支撑检测判定的可追溯性（例如修复基线版本号），
+不构成对原发布方观点的背书。
+
+=========================================================================
+三、品牌与标识
+=========================================================================
+
+`docs/assets/见微-Pinpoint-Logo.svg` 等标识为本项目自有素材。
+Apache-2.0 许可第 6 条明确：本许可**不授予**使用本项目商标、商品名的权利。

@@ -54,6 +54,12 @@ jobs:
       - name: 载荷守护
         run: python scripts/check_payload_literals.py .
 
+      - name: 文档数字与代码一致
+        env:
+          P2S_CONSOLE_PASSWORD: test-pass
+          P2S_ADMIN_PASSWORD: test-pass
+        run: python -m pytest tests/test_doc_freshness.py tests/test_benchmark.py -q
+
   # ------------------------------------------------------------------
   # 接口契约：锁定所有 API 的响应结构（拆分/重构时的安全网）
   # ------------------------------------------------------------------
