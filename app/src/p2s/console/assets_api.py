@@ -13,8 +13,15 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from ..core import discovery
 from ..core.versions import FIXED_RELEASES, classify
-from .deps import *  # noqa: F401,F403
+from .deps import (  # noqa: F401  —— 显式导入，避免星号导入掩盖未定义名
+    _asset_from_profile,
+    _csv_response,
+    _load_assets,
+    _lock,
+    _save_assets,
+)
 
 router = APIRouter()
 

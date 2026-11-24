@@ -17,10 +17,29 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from ..core import discovery, hostcheck, identification, logscan
+from ..core import probe as probe_mod
 from ..core import report as report_mod
 from ..core.rules import coverage_report
 from .agent_api import _ingest_host_report
-from .deps import *  # noqa: F401,F403
+from .deps import (  # noqa: F401  —— 显式导入，避免星号导入掩盖未定义名
+    JOBS,
+    KB_FILE,
+    MAX_UPLOAD_BYTES,
+    SCANS_DIR,
+    UPLOAD_DIR,
+    _asset_from_profile,
+    _atomic_write,
+    _diff_asset,
+    _expand_cidr,
+    _load_assets,
+    _load_scans,
+    _lock,
+    _new_scan,
+    _persist,
+    _resolve_log_path,
+    _save_assets,
+    _scan_signature,
+)
 
 router = APIRouter()
 

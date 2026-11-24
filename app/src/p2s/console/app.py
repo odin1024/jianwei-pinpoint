@@ -32,7 +32,23 @@ app = FastAPI(
 )
 
 # 共享底座（路径/存储/鉴权/任务/CSV）已拆到 deps.py
-from .deps import *  # noqa: F401,F403,E402
+from .deps import (  # noqa: F401  —— 显式导入，避免星号导入掩盖未定义名
+    _UNAUTH_OK,
+    ADMIN_USER,
+    DATA_DIR,
+    SCANS_DIR,
+    SESSION_COOKIE,
+    SESSION_TTL,
+    _credentials_ok,
+    _csv_response,
+    _issue_session,
+    _load_assets,
+    _load_scans,
+    _scan_summary,
+    _session_valid,
+    _sessions,
+    _sessions_lock,
+)
 
 
 @app.middleware("http")
@@ -106,7 +122,6 @@ def api_about() -> dict:
 
     from .. import __version__
     from ..core import rulebook
-    from .deps import DATA_DIR, SCANS_DIR
 
     st = rulebook.stats()
     scans = len(list(SCANS_DIR.glob("*.json"))) if SCANS_DIR.exists() else 0

@@ -16,7 +16,15 @@ from fastapi.responses import Response
 
 from ..core import agentkit
 from ..core.versions import classify
-from .deps import *  # noqa: F401,F403
+from .deps import (  # noqa: F401  —— 显式导入，避免星号导入掩盖未定义名
+    AGENT_TOKEN,
+    _diff_asset,
+    _load_assets,
+    _lock,
+    _new_scan,
+    _persist,
+    _save_assets,
+)
 
 router = APIRouter()
 
