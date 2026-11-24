@@ -17,10 +17,12 @@ import websocket
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _console_auth import credentials_json  # noqa: E402
+from _toolpath import chrome as _chrome  # noqa: E402
+from _toolpath import user_data_dir as _udd
 
 PORT = 9346
 BASE = "http://127.0.0.1:18080"
-CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+CHROME = None  # 运行时由 _chrome() 定位（环境变量 P2S_CHROME 可覆盖）
 
 ASSETS_PROBE = r"""
 (() => {
@@ -143,9 +145,9 @@ DIALOG_PROBE = r"""
 
 
 def launch() -> subprocess.Popen:
-    profile = pathlib.Path.home() / "AppData/Local/Temp/cdp-layout"
+    profile = pathlib.Path(_udd("layout"))
     return subprocess.Popen(
-        [CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+        [_chrome(), "--headless=new", "--disable-gpu", "--hide-scrollbars",
          "--force-device-scale-factor=1", "--window-size=1600,1000",
          "--no-first-run", "--no-default-browser-check",
          f"--remote-debugging-port={PORT}", f"--user-data-dir={profile}",

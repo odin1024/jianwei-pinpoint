@@ -12,16 +12,18 @@ import websocket  # websocket-client
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _console_auth import credentials_json  # noqa: E402
+from _toolpath import chrome as _chrome  # noqa: E402
+from _toolpath import user_data_dir as _udd
 
 PORT = 9333
 BASE = "http://127.0.0.1:18080"
-EDGE = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+EDGE = None  # 运行时由 _chrome() 定位（环境变量 P2S_CHROME 可覆盖）
 
 
 def launch() -> subprocess.Popen:
     return subprocess.Popen(
-        [EDGE, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-         f"--remote-debugging-port={PORT}", "--user-data-dir=" + r"C:\Users\<用户名>\AppData\Local\Temp\cdp-prof2",
+        [_chrome(), "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+         f"--remote-debugging-port={PORT}", "--user-data-dir=" + _udd("prof2"),
          "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

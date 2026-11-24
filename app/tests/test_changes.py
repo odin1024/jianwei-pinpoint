@@ -73,7 +73,7 @@ def test_common_but_meaningful_port_is_not_noise():
 # R-07
 # --------------------------------------------------------------------------
 def test_diff_asset_new_changed_same():
-    from p2s.console.app import _diff_asset
+    from p2s.console.deps import _diff_asset
 
     new = {"exposure": "not_php", "php_version": None, "risk": "low"}
     assert _diff_asset(None, new)["kind"] == "new"

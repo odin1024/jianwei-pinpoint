@@ -17,9 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _console_auth import credentials  # noqa: E402
+from _toolpath import node as _node  # noqa: E402
 
 BASE = "http://127.0.0.1:18080"
-NODE = r"C:\Users\<用户名>\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+NODE = None  # 运行时由 _node() 定位（环境变量 P2S_NODE 可覆盖）
 
 
 def fetch_html() -> str:
@@ -41,7 +42,7 @@ def main() -> int:
     body = max(scripts, key=len)
     tmp = pathlib.Path(tempfile.gettempdir()) / "p2s_page.js"
     tmp.write_text(body, encoding="utf-8")
-    node = NODE if pathlib.Path(NODE).exists() else "node"
+    node = _node()
     r = subprocess.run([node, "--check", str(tmp)], capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if r.returncode == 0:

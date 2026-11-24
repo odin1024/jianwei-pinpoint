@@ -91,7 +91,8 @@ def test_unauthenticated_all_api_return_401(client):
     """除了白名单，所有 /api/* 未登录都应 401。"""
     from fastapi.testclient import TestClient
 
-    from p2s.console.app import _UNAUTH_OK, app
+    from p2s.console.app import app
+    from p2s.console.deps import _UNAUTH_OK
 
     with TestClient(app, follow_redirects=False) as c:
         for path, _status, _keys in CONTRACTS:

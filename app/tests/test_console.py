@@ -90,7 +90,7 @@ def test_log_path_missing_rejected(auth_client):
 
 
 def test_log_path_inside_allowlist_accepted(auth_client, tmp_path):
-    from p2s.console.app import _LOG_ROOTS, _resolve_log_path
+    from p2s.console.deps import _LOG_ROOTS, _resolve_log_path
 
     root = _LOG_ROOTS[0]
     root.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ def test_non_log_suffix_rejected_even_inside_allowlist():
     """在允许目录里也不读 .ini / .key 这类文件。"""
     from fastapi import HTTPException
 
-    from p2s.console.app import _LOG_ROOTS, _resolve_log_path
+    from p2s.console.deps import _LOG_ROOTS, _resolve_log_path
 
     root = _LOG_ROOTS[0]
     root.mkdir(parents=True, exist_ok=True)
@@ -234,7 +234,7 @@ def test_agent_report_requires_host_identifier(auth_client):
 # CSV 导出
 # --------------------------------------------------------------------------
 def test_csv_formula_injection_escaped():
-    from p2s.console.app import _csv_cell
+    from p2s.console.deps import _csv_cell
 
     assert _csv_cell("=1+1") == "'=1+1"
     assert _csv_cell("+86") == "'+86"
@@ -299,13 +299,14 @@ def test_modsecurity_export_wellformed():
 # 报告落盘
 # --------------------------------------------------------------------------
 def test_first_persist_sets_finished_at():
-    from p2s.console import app as app_mod
+    # 这些是 deps 的内部工具函数，从定义处导入（原来靠 app 的星号导入顺带再导出）
+    from p2s.console.deps import SCANS_DIR, _new_scan, _persist
 
-    res = app_mod._new_scan("logs")
+    res = _new_scan("logs")
     assert res.finished_at == ""
-    app_mod._persist(res)
+    _persist(res)
     assert res.finished_at != ""
-    p = app_mod.SCANS_DIR / f"{res.scan_id}.json"
+    p = SCANS_DIR / f"{res.scan_id}.json"
     data = json.loads(p.read_text(encoding="utf-8"))
     assert data["finished_at"], "落盘报告里结束时间不能为空"
 

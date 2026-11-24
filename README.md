@@ -12,7 +12,7 @@
 ## 一、目录结构
 
 ```
-PHP2Shell漏洞检测工具/
+PHP2Shell漏洞检测工具/        ← Git 仓库根（含文档、工具与代码）
 ├── app/                       ★ 唯一代码工程（可直接运行）
 │   ├── src/p2s/               引擎（core/）+ 命令行（cli.py）+ 控制台（console/）+ Agent
 │   ├── tests/                 121 个用例
@@ -77,8 +77,8 @@ $env:P2S_ADMIN_PASSWORD = "换成你的强口令"
 ## 项目结构
 
 ```
-PHP2Shell漏洞检测工具/
-├── app/                    ← Git 仓库根（CI 在 app/.github/）
+PHP2Shell漏洞检测工具/        ← Git 仓库根（含文档、工具与代码）
+├── app/                    代码与发行包（CI 在 app/.github/）
 │   ├── src/p2s/
 │   │   ├── core/           引擎：探测/识别/取证/日志/规则/报告
 │   │   │   ├── discovery.py     端口→协议→存活→指纹→PHP 暴露面
@@ -101,12 +101,35 @@ PHP2Shell漏洞检测工具/
 └── CONTRIBUTING.md         开发规范（每条都对应一次真实事故）
 ```
 
-## 四、当前状态（2026-10-29 验证）
+## 四、当前状态（2026-11-25 实测）
 
-- 单元测试 **134 passed**、`ruff` 零告警、载荷守护通过、控制台验收 29/29
-- **全子网实测**：`192.168.1.0/24` 254 台探测 → 17 台在线 / 237 台无有效响应（NAT/tarpit 噪声已排除），耗时 737s
-- 设备识别：捷普 10 / 华为 3 / FileZilla 2 / 小米 1 / 未识别 2；无跨厂商误判
-- 版本 **1.0.4**；修复清单见 `docs/02-产品/v0.5.1-修复清单.md`
-- **开发规范**见 [`CONTRIBUTING.md`](./CONTRIBUTING.md)（改完必须回读产物、新增能力要有端到端断言、单文件只允许一个写者）
-- **变更记录**见 [`CHANGELOG.md`](./CHANGELOG.md)（每次改动的内容/原因/验证方式，发布前必须更新）
-- **设备识别与指纹逻辑**见 `docs/02-产品/设备识别逻辑说明.md`（含 favicon mmh3、页面元数据、TLS 取证）
+| 项 | 值 |
+|---|---|
+| 版本 | **1.1.3**（单一来源：`app/src/p2s/__init__.py`）|
+| 单元测试 | **504 passed**（41 个用例文件）|
+| 加固规则库 | **102 条**（8 类：会话/信息暴露/高危特性/资源/日志/FPM/Web 服务器/系统服务，另有 K8s 10 条）|
+| 覆盖 CVE | CVE-2026-109618、CVE-2026-109619 |
+| 修复基线 | 8.5→8.5.12 · 8.4→8.4.27 · 8.3→8.3.36 · 8.2→8.2.35 |
+| 加固层次 | PHP ini / PHP-FPM / Web 服务器 / systemd / Kubernetes |
+
+**门禁**（改完必跑，见 [`CONTRIBUTING.md`](./CONTRIBUTING.md)）：
+
+```powershell
+cd app
+$env:P2S_ADMIN_PASSWORD = "你的口令"      # 1.0.5 起无内置默认口令
+.\.venv\Scripts\python.exe -m pytest -q          # 504 passed
+.\.venv\Scripts\python.exe -m ruff check src tests scripts
+.\.venv\Scripts\python.exe scripts\verify_console.py      # 29 项
+.\.venv\Scripts\python.exe scripts\check_page_js.py       # 内联 JS 语法
+.\.venv\Scripts\python.exe scripts\check_page_html.py     # 标签配平
+.\.venv\Scripts\python.exe scripts\check_api_consistency.py  # 前后端接口一致
+```
+
+**历史实测记录**（2026-10-30）：`192.168.1.0/24` 全子网 254 台探测 → 17 台在线，
+设备识别捷普 10 / 华为 3 / FileZilla 2 / 小米 1 / 未识别 2，无跨厂商误判。
+该网段现已不可达，相关资产已于 1.1.3 清理，仅保留真实主机。
+
+**文档地图**：本项目文档分两处，分工与权威性见 **[`docs/README.md`](./docs/README.md)**。
+- `docs/` — 立项 / 产品 / 情报 / 部署（决策与背景）
+- `app/docs/` — 架构 / 检测原理 / 平台适配 / 客户部署（**技术描述以此为准**，随代码走）
+- [`CHANGELOG.md`](./CHANGELOG.md) — **变更记录的唯一权威来源**
