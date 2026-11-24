@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
+from ..core import harden_ps as HPS
 from ..core import hardening as H
 from ..core import k8s_harden, rulebook
 from .deps import (
@@ -156,18 +157,26 @@ def api_hardening_pack(host: str) -> Response:
         raise HTTPException(status_code=400, detail="当前没有需要加固的配置项")
     plan_hash = H.plan_fingerprint(host, target, actions)
     tk = _issue_ticket(host, target, plan_hash)
-    files = H.build_pack(host, hr, target, actions, ticket=tk["id"])
+    # 目标平台决定用哪套生成器：
+    #   含反斜杠或盘符 → Windows（PowerShell）
+    #   其余            → POSIX（sh）
+    # 两者的计划指纹算法一致，因此票据可跨平台复用。
+    is_windows = ("\\" in target) or (":" in target[:3])
+    build = HPS.build_pack if is_windows else H.build_pack
+    files = build(host, hr, target, actions, ticket=tk["id"])
+    plat = "windows" if is_windows else "posix"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for name, content in files.items():
             info = zipfile.ZipInfo(name)
-            info.external_attr = 0o755 << 16 if name.endswith(".sh") else 0o644 << 16
+            info.external_attr = (0o755 << 16 if name.endswith((".sh", ".ps1"))
+                                  else 0o644 << 16)
             z.writestr(info, content)
-    _save_record(host, {**_load_record(host), "issued_at": H._now(),
+    _save_record(host, {**_load_record(host), "issued_at": H._now(), "platform": plat,
                         "target": target, "actions": actions})
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition":
-                             f'attachment; filename="p2s-harden-{host}.zip"'})
+                             f'attachment; filename="p2s-harden-{host}-{plat}.zip"'})
 
 
 @router.post("/api/hardening/receipt")

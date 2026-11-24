@@ -11,7 +11,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: p2s-console:1.2.0
+    image: p2s-console:1.3.0
     container_name: p2s-console
     restart: unless-stopped
     ports:

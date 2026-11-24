@@ -668,10 +668,101 @@ K8S: tuple[Rule, ...] = (
          "改回 true（不推荐）"),
 )
 
+
+# ======================================================================
+# J. Windows / IIS 加固
+#
+# 为什么单独成组：IIS 的配置模型（applicationHost.config + 站点/应用池/web.config
+# 三级继承）与 nginx/apache 完全不同，指令名不能照搬；Windows 的"他人可写"是 ACL
+# 而非权限位。这些规则的目标类型为 iis / acl / winsvc，由 Windows 侧工具读取。
+# ======================================================================
+WIN: tuple[Rule, ...] = (
+    Rule("WIN-001", "Windows / IIS", "iis", "directoryBrowse.enabled", "true", "false",
+         "high", False,
+         "开启目录浏览会把站点目录结构完整暴露给未授权访问者，"
+         "攻击者可据此定位上传目录、备份文件与配置文件。",
+         "依赖目录列表的静态资源站点会 403，需先确认没有页面依赖自动索引。",
+         "Get-WebConfigurationProperty -PSPath 'IIS:\\' -Filter 'system.webServer/directoryBrowse' "
+         "-Name enabled",
+         "Set-WebConfigurationProperty -Filter 'system.webServer/directoryBrowse' -Name enabled "
+         "-Value true"),
+    Rule("WIN-002", "Windows / IIS", "iis", "webdav.enabled", "true", "false",
+         "critical", False,
+         "IIS 的 WebDAV 模块允许通过 HTTP 直接 PUT/MOVE 文件。"
+         "它既是 webshell 上传通道，历史上也出过多个远程执行漏洞。",
+         "确实用 WebDAV 共享文档的站点会失效，需改用 SMB 并关闭公网暴露。",
+         "Get-WebConfigurationProperty -PSPath 'IIS:\\' -Filter 'system.webServer/webdav' -Name enabled",
+         "Enable-WebDAV（不推荐恢复）"),
+    Rule("WIN-003", "Windows / IIS", "iis", "requestFiltering.maxAllowedContentLength",
+         "30000000", "8388608", "high", False,
+         "默认 30MB 的上传上限远超 webshell 所需体积，"
+         "调小可显著降低「大文件上传绕过」与磁盘占满风险。",
+         "业务若确实要传大附件（视频/安装包）会 404.13，需按业务目录单独放宽。",
+         "Get-WebConfigurationProperty -PSPath 'IIS:\\' "
+         "-Filter 'system.webServer/security/requestFiltering/requestLimits' "
+         "-Name maxAllowedContentLength",
+         "改回 30000000"),
+    Rule("WIN-004", "Windows / IIS", "iis", "applicationPool.processModel.identityType",
+         "LocalSystem", "ApplicationPoolIdentity", "critical", False,
+         "应用池以 LocalSystem 运行时，webshell 一旦落地就直接拿到本机管理员权限；"
+         "ApplicationPoolIdentity 是自动生成的低权限虚拟账户，能把影响面限制在站点目录内。",
+         "切换到低权限账户后，站点目录与 session 目录需要显式授予该账户读/写权限，"
+         "否则会立即 500。",
+         "Get-IISAppPool <应用池> | Select-Object -ExpandProperty ProcessModel | "
+         "Select-Object IdentityType",
+         "改回 LocalSystem（强烈不推荐）"),
+    Rule("WIN-005", "Windows / IIS", "iis", "httpErrors.errorMode", "Detailed", "DetailedLocalOnly",
+         "medium", False,
+         "详细错误会把堆栈、物理路径、PHP 配置暴露给外部访问者，是信息收集的起点。"
+         "DetailedLocalOnly 让本机排障照旧，外部只看到通用错误页。",
+         "需要从远端看详细错误时必须临时调整，排障后应改回。",
+         "Get-WebConfigurationProperty -PSPath 'IIS:\\' -Filter 'system.webServer/httpErrors' "
+         "-Name errorMode",
+         "改回 Detailed"),
+    Rule("WIN-006", "Windows / IIS", "iis", "httpProtocol.customHeaders.X-Powered-By", "PHP/8.x",
+         "(删除)", "medium", False,
+         "响应头直接写明 PHP 版本，让攻击者无需探测即可匹配已知漏洞，"
+         "本项目关注的 php2shell 正属于此类。",
+         "无功能影响；仅极少数监控脚本会读该头。",
+         "(Invoke-WebRequest -Uri http://<站点>/ -UseBasicParsing).Headers['X-Powered-By']",
+         "expose_php=1 且重启 IIS 后会重新出现"),
+    Rule("WIN-007", "Windows / IIS", "iis", "fastCgi.activityTimeout", "300", "30",
+         "medium", False,
+         "FastCGI 活动超时过长时，OOM 崩溃的 php-cgi 进程会长时间挂住，"
+         "配合请求堆积可拖垮整个应用池。",
+         "长耗时任务（报表导出/大文件处理）可能被中断，需按业务上限调整。",
+         "Get-WebConfigurationProperty -PSPath 'IIS:\\' "
+         "-Filter 'system.webServer/fastCgi/application' -Name activityTimeout",
+         "改回 300"),
+    Rule("WIN-008", "Windows 权限", "acl", "php.ini ACL", "Everyone:(R)",
+         "仅 Administrators + SYSTEM", "critical", False,
+         "php.ini 若对普通用户或 Everyone 可写，任何本地低权限进程都能植入恶意指令；"
+         "加固脚本本身也会拒绝执行对非特权主体可写的目标。",
+         "收紧后必须确认 IIS 应用池账户仍可读取该文件，否则 PHP 启动即失败。",
+         "icacls C:\\php\\php.ini",
+         "icacls C:\\php\\php.ini /grant Everyone:(R)"),
+    Rule("WIN-009", "Windows 权限", "acl", "PHP 安装目录可写性", "Users:(M)", "仅 Administrators + SYSTEM",
+         "critical", False,
+         "PHP 安装目录（含 ext/、php.ini 所在目录）若对普通用户可写，"
+         "webshell 可以直接落地并被 include —— 这比改配置更难察觉。",
+         "部分自更新脚本依赖目录可写，收紧后需改用计划任务以管理员身份运行。",
+         "icacls C:\\php /T",
+         "icacls C:\\php /grant Users:(M)"),
+    Rule("WIN-010", "Windows 权限", "winsvc", "W3SVC / php-cgi 服务账户", "LocalSystem",
+         "NT AUTHORITY\\LocalService", "high", False,
+         "服务以 LocalSystem 运行时，服务进程被攻陷等于拿下本机；"
+         "LocalService 或独立虚拟账户可显著限制横向移动。",
+         "换账户后需重新授予日志目录、临时目录与 php.ini 的访问权限，"
+         "否则服务无法启动。",
+         "Get-CimInstance Win32_Service -Filter \"Name='W3SVC'\" | Select-Object StartName",
+         "sc.exe config W3SVC obj= LocalSystem"),
+)
+
+
 ALL: tuple[Rule, ...] = (SESSION + SESSION2 + EXPOSURE + DANGEROUS + DANGEROUS2
                          + RESOURCE + RESOURCE2 + LOGGING
                          + FPM + FPM2 + WEBSERVER + WEBSERVER2 + SYSTEMD + SYSTEMD2
-                         + K8S)
+                         + K8S + WIN)
 
 CATEGORIES: tuple[str, ...] = tuple(dict.fromkeys(r.category for r in ALL))
 
