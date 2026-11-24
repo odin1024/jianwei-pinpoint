@@ -33,6 +33,66 @@
 
 ---
 
+## [1.2.0] - 2026-11-25
+
+主题：**发布前清理（消除星号导入、文档统一、脚本可移植、CI 上架）**
+
+### 一、消除星号导入 → 暴露并修复两个潜伏的 NameError
+4 个模块使用 `from .deps import *`，而 `deps` 定义了 `__all__` —— 星号导入只带
+`__all__` 里的名字，导致 **ruff 的 F821（未定义名）对这些模块完全失效**。
+
+换成显式导入后立刻报出 3 个真问题：
+
+| # | 问题 | 影响 |
+|---|---|---|
+| 1 | `assets_api` 调用 `discovery.discover()` 但从未导入 | **"手工添加资产并扫描"接口一直 500**（用 `git show HEAD` 确认旧版确实没有该导入）|
+| 2 | `scan_api` 调用 `probe_mod.assess()` 但从未导入 | URL 探测任务会 `NameError` |
+| 3 | `app.py` 函数内重复导入 `DATA_DIR/SCANS_DIR` | 遮蔽模块级名字 |
+
+新增 `tests/test_api_smoke.py`（22 项）：18 个只读接口逐一真实调用断言不出现 5xx，
+外加两个事故接口的专项回归。**已用"临时撤销修复"验证测试会红**
+（`NameError: name 'discovery' is not defined`）—— 证明这测试确实能拦住。
+
+### 二、文档权威性
+- 新增 `docs/README.md` 文档地图：定义分工（根 `docs/` = 决策与背景；
+  `app/docs/` = 技术手册随代码走）、按主题查哪份、冲突时以哪份为准；
+- 三份历史快照加"历史"横幅（v0.5.0 交付包索引、v0.5.1 修复清单、立项过程记录），
+  **保留原文不改写**，只在文首指向当前文档；
+- 根 README 修正两处过期表述：删掉"`app/` ← Git 仓库根"（仓库根已上移）、
+  当前状态段换成实测数据。
+
+### 三、脚本可移植化
+7 个脚本写死了 `C:\Users\<用户名>\...` 与 `C:\Program Files\Google\Chrome\...`，
+**换一台机器或 CI 就跑不起来**。新增 `scripts/_toolpath.py`：
+按「环境变量 `P2S_CHROME`/`P2S_NODE` → PATH → 常见安装位置 → 明确报错」四级定位，
+并提供可移植的临时 profile 目录。实测 Node 走 PATH 找到 `D:\Program Files\nodejs\node.exe`。
+
+### 四、CI 真正上架
+原来工作流在 `app/.github/` —— **GitHub 只认仓库根的 `.github/`，它从未被执行过**。
+现移到仓库根，并用 `defaults.run.working-directory: app` 适配目录结构，
+同时把门禁纳入 CI：
+
+| job | 内容 |
+|---|---|
+| `test` | 2 系统 × 2 Python 版本：ruff / pytest / 载荷守护 |
+| `contract` | 接口契约测试 |
+| `agent-scripts` | 双平台脚本渲染 + `sh -n` / `bash -n` |
+| `ui-gates` | 起控制台 + Chrome CDP：JS 语法 / HTML 配平 / 接口一致性 / 布局与弹窗 / 16 页审计 / 验收 |
+
+新增 `make verify`（CI 的无浏览器部分）与 `make verify-ui`（浏览器部分），
+本地一条命令等价于 CI。
+
+### 五、修正两处不实声明
+| 项 | 原值 | 实测 | 修正 |
+|---|---|---|---|
+| `requires-python` | `>=3.9` | 锁定依赖要求 **≥3.11**（starlette 1.10 即需 3.11）| `>=3.11` |
+| `requirements.lock.txt` | 含 paramiko 闭包 + 一条指向无关目录的 editable 记录 | 非产品依赖 | 重新生成，并新增 `ui`/`cloudtest` extras |
+
+### 回归
+`pytest 504 passed` / ruff 全过 / 7 个脚本实测正常 / 16 页审计全绿。
+
+---
+
 ## [1.1.3] - 2026-11-25
 
 主题：**修复"文档不在版本控制"的 P0 问题 + 四项清理 + 新增接口一致性门禁**
