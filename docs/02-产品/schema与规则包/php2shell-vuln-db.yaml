@@ -1,0 +1,328 @@
+# ============================================================
+# P2S-Guard 漏洞知识库规则包
+# 漏洞族：PHP2Shell
+# 版本：2026.10.28-1
+# 说明：
+#   - 本文件为规则包结构示例，字段语义见 04-检测引擎技术方案.md 第 12 章
+#   - binary.signature_bytes_* 留空，由指纹库构建工具自动填充
+#   - 发布前须经 Ed25519 签名，客户端拒绝加载未签名规则包
+# ============================================================
+
+id: php2shell
+name: "PHP2Shell (CVE-2026-109618 / CVE-2026-109619)"
+version: "2026.10.28-1"
+published_at: "2026-10-28T00:00:00Z"
+severity: critical
+cvss_v4: 9.2
+cvss_vector: "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+summary: >
+  PHP 解释器内核内存安全缺陷，未认证远程代码执行 + 进程内存泄露。
+  触发位于请求启动阶段，早于任何应用脚本执行，应用层防护措施（WAF、安全插件、
+  disable_functions、代码审计）均无法规避。修复仅能通过升级 PHP 运行时实现。
+
+disclosure:
+  reported_at: "2026-08-11"
+  published_at: "2026-10-21T14:00:00Z"
+  exploitation_seen_since: "2026-10-17"
+  reporters: ["lcfr-hax (Calif)", "Wiz Research", "OpenAI"]
+  advisories:
+    - key: PHP-2026-10-21-5
+      url: "https://www.php.net/archive/2026.php#2026-10-21-5"
+
+cves:
+  - id: CVE-2026-109618
+    ghsa: GHSA-w8hw-w9fx-j79w
+    title: "RCE via OOM corruption"
+    cwe: [CWE-416, CWE-755, CWE-824, CWE-1325, CWE-1419]
+    root_cause: >
+      PHP 使用 longjmp() 处理 OOM 以跳出当前上下文。部分上下文在请求内存尚未
+      完全初始化时即可访问；此时任何分配失败都会留下未正确处理的提前退出，
+      使请求内存处于非法状态。失败的分配无需与被破坏内存相关。request shutdown
+      可能读取或基于该状态分支，导致 RCE。
+    trigger_vectors:
+      - "multipart 请求无可用的声明 content-length，绕过初始 post_max_size 检查后继续供给数据"
+      - "单个 part 携带无限制数量的 header，内部表示开销远大于线路表示"
+      - "空文件控件不计入 max_file_uploads，但仍创建文件元数据数组；嵌套字段名成倍放大"
+      - "应用层攻击者可控输入导致的大分配（应用相关路径）"
+  - id: CVE-2026-109619
+    ghsa: GHSA-6wmf-4rv5-p3rp
+    title: "RCE via stale global state"
+    cwe: [CWE-416, CWE-755, CWE-824, CWE-1325, CWE-1419]
+    root_cause: >
+      请求级状态被存入全局可访问位置，未重置或在重置后被重新填充；请求内存被释放
+      而常驻 worker 仍保留全局引用；同一 worker 的下一个请求在正常初始化重置前
+      访问该过期状态，构成 UAF。
+    producers_consumers:
+      - producer: "session.upload_progress 反序列化"
+        consumer: "下一请求的上传进度清理路径"
+        impact: "内存泄露（PHPSESSID 回显）→ 与内存破坏组合实现 RCE"
+      - producer: "致命 OOM 错误回溯（EG(last_fatal_error_backtrace)）"
+        consumer: "下一请求早期的 INI 诊断/warning"
+        impact: "跨请求 UAF → 受控内存破坏 → RCE（仅 mod_php 已验证）"
+      - producer: "任意可达的全局状态写入"
+        consumer: "请求初始化前的 INI 警告/废弃提示"
+        impact: "无需 fatal、无需显示或记录即可触发，error_reporting 无法关闭"
+    notable_settings:
+      - "auto_detect_line_endings=1"
+      - "filter.default 非默认值"
+      - "PHP 8.3+ 遗留 assert.* 配置"
+      - "PHP 8.4+ 遗留 session 配置"
+      - "PHP 8.5 report_memleaks=0 或非零 intl.error_level"
+      - "显式配置的 mbstring.* / iconv.* 编码项"
+      - "非法或冲突的 zend.assertions / memory_limit / date.timezone / 扩展项"
+
+affected:
+  - branch: "8.5"
+    affected: "<8.5.12"
+    fixed: "8.5.12"
+    eol: false
+    support_until: "2029-12-31"
+  - branch: "8.4"
+    affected: "<8.4.27"
+    fixed: "8.4.27"
+    eol: false
+    support_until: "2028-12-31"
+  - branch: "8.3"
+    affected: "<8.3.36"
+    fixed: "8.3.36"
+    eol: false
+    support_until: "2027-12-31"
+  - branch: "8.2"
+    affected: "<8.2.35"
+    fixed: "8.2.35"
+    eol: false
+    support_until: "2026-12-31"
+  - branch: "8.1"
+    affected: "*"
+    fixed: null
+    eol: true
+    note: "仅提供源码级 backport 分支，需自行编译，不具备工程可维护性"
+  - branch: "<=8.0"
+    affected: "*"
+    fixed: null
+    eol: true
+    note: "可追溯至 PHP 5.4，官方无修复"
+
+sapi_matrix:
+  apache2handler:
+    exploitable: confirmed
+    app_independent: true
+    weight: 1.0
+    note: "无条件执行 request shutdown，请求启动阶段即可触发；默认配置下已演示完整 RCE"
+  frankenphp:
+    exploitable: likely
+    app_independent: true
+    weight: 1.0
+    note: "源码分析与 mod_php 同构，未验证"
+  fpm-fcgi:
+    exploitable: confirmed
+    app_independent: false
+    weight: 0.75
+    note: "启动失败会杀子进程；109619 的 session 生命周期 RCE 已在 FPM 验证"
+  litespeed:
+    exploitable: likely
+    app_independent: false
+    weight: 0.75
+    note: "模型类似 FPM，应用相关利用可能，未验证"
+  cgi-fcgi:
+    exploitable: possible
+    app_independent: false
+    weight: 0.4
+  cli:
+    exploitable: none
+    app_independent: false
+    weight: 0.1
+    note: "单次执行、进程退出，无法构造跨请求利用链"
+  cli-server:
+    exploitable: possible
+    app_independent: false
+    weight: 0.5
+
+preconditions:
+  - key: memory_limit
+    constraint: finite
+    affects: [CVE-2026-109618, CVE-2026-109619]
+    weight: 0.35
+    note: "有限值是可控制 OOM 的前提；-1 可阻断已确认路径但不是完整缓解"
+  - key: session.upload_progress.enabled
+    default: "1"
+    affects: [CVE-2026-109619]
+    weight: 0.30
+    note: "已验证的 producer 之一"
+  - key: post_max_size
+    affects: [CVE-2026-109618]
+    weight: 0.15
+    note: "保守值 + 前端独立校验可降低风险"
+  - key: max_file_uploads
+    affects: [CVE-2026-109618]
+    weight: 0.05
+    note: "空文件控件不计入此限制"
+  - key: max_input_nesting_level
+    affects: [CVE-2026-109618]
+    weight: 0.05
+    note: "嵌套字段名放大数组开销"
+  - key: fatal_error_backtraces
+    applies_to_branch: "8.5"
+    affects: [CVE-2026-109619]
+    weight: 0.10
+
+patch_markers:
+  changelog_patterns:
+    - 'CVE-2026-10961[89]'
+    - 'php2shell'
+  package_probe:
+    rpm: "rpm -q --changelog {package} | grep -nE 'CVE-2026-10961[89]'"
+    dpkg: "zcat /usr/share/doc/{package}/changelog.Debian.gz | grep -nE 'CVE-2026-10961[89]'"
+    apk: "apk info -a {package} | grep -iE 'CVE-2026-10961[89]'"
+  binary:
+    - name: "libphp-8.4.x-patched"
+      applies_to: "8.4.27"
+      build_id: null
+      sha256: []
+      signature_bytes_patched: []       # 由指纹库构建工具填充
+      signature_bytes_vulnerable: []
+    - name: "libphp-8.3.x-patched"
+      applies_to: "8.3.36"
+      build_id: null
+      sha256: []
+      signature_bytes_patched: []
+      signature_bytes_vulnerable: []
+  source:
+    - "git -C {src} log --oneline --grep='CVE-2026-10961'"
+    - "test -f {src}/debian/patches/series && grep -l 'CVE-2026-10961' {src}/debian/patches/*"
+  semantic_hints:
+    - "补丁移除了 OOM 路径上的 longjmp() 调用点"
+    - "新增延迟软 OOM（下一个 VM safe point）与硬 OOM（第二阈值 _exit）"
+    - "request shutdown 阶段新增 error/exception 状态清理"
+    - "请求早期新增序列化与 session 状态初始化"
+
+mitigations:
+  - id: upgrade
+    complete: true
+    priority: 1
+    action: "升级至 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12 或更高版本"
+    note: "官方明确：升级是唯一完整缓解手段"
+  - id: eol_migrate
+    complete: true
+    priority: 1
+    condition: "版本 <= 8.1"
+    action: "无官方修复，必须迁移至受支持分支（建议 8.4/8.5）"
+  - id: disable_upload_progress
+    complete: false
+    priority: 2
+    action: "session.upload_progress.enabled=0"
+    note: "仅切断已演示的 session 生命周期路径，不覆盖其他 producer"
+  - id: disable_backtraces
+    complete: false
+    priority: 2
+    condition: "PHP 8.5"
+    action: "fatal_error_backtraces=0"
+  - id: memory_limit_disable
+    complete: false
+    priority: 3
+    action: "memory_limit=-1，并在 Web 服务器/代理层独立限制请求体大小"
+    note: "非完整缓解；若 mmap 失败仍可能回到脆弱路径"
+  - id: pm_max_requests
+    complete: false
+    priority: 3
+    condition: "PHP-FPM"
+    action: "pm.max_requests=1"
+    note: "打破跨请求复用条件，代价是每请求一次进程启动开销"
+  - id: frontend_block
+    complete: false
+    priority: 3
+    action: "WAF/反向代理阻断已知攻击模式，限制 multipart part 数、part 内 header 数、请求体大小"
+    note: "可被构造变形绕过，仅作时间窗保护"
+  - id: restrict_exposure
+    complete: false
+    priority: 3
+    condition: "无法及时修复"
+    action: "临时下线、只读模式、收敛至运维网段/VPN"
+  - id: forbid_rlimit
+    complete: false
+    forbidden: true
+    action: "禁止使用 RLIMIT_AS / RLIMIT_DATA 做内存限制"
+    note: "达到限制会使 mmap() 失败，重新触发脆弱的 longjmp 路径，扩大攻击面"
+  - id: restart_workers
+    complete: false
+    priority: 1
+    action: "任何配置变更后必须重启全部 PHP worker"
+    note: "运行中的 worker 仍沿用旧配置；未重启等于未生效"
+
+hunt_rules:
+  - id: HUNT-001
+    name: "启动期 OOM 聚集"
+    confidence: medium
+    pattern: 'PHP Fatal error:\s+Allowed memory size of \d+ bytes exhausted.*?in Unknown on line 0'
+    threshold: 3
+    window: 10m
+  - id: HUNT-002
+    name: "OOM 与大 POST 关联"
+    confidence: high
+    depends_on: [HUNT-001]
+    condition: "HUNT-001 命中前后 60s 内存在 body_size > 1MB 的 POST"
+  - id: HUNT-003
+    name: "Worker 崩溃"
+    confidence: medium
+    patterns:
+      - 'AH00052: child pid \d+ exit signal Segmentation fault'
+      - 'child exited on signal 11'
+  - id: HUNT-004
+    name: "上传进度标记探测"
+    confidence: medium
+    pattern: 'PHP_SESSION_UPLOAD_PROGRESS'
+    condition: "非业务正常调用路径"
+  - id: HUNT-005
+    name: "异常 PHPSESSID（内存泄露强特征）"
+    confidence: high
+    condition: "Set-Cookie PHPSESSID 值长度 > 200 或含连续 URL 编码二进制串"
+    note: "正常 PHP session id 为定长字母数字，出现 KB 级 URL 编码串基本可确定正在打内存泄露"
+  - id: HUNT-006
+    name: "Multipart 异常"
+    confidence: medium
+    condition: "part 数 > 阈值 或 单 part header 数 > 阈值 或 字段名长度 > 64KB 或 嵌套深度异常"
+  - id: HUNT-007
+    name: "空文件控件滥用"
+    confidence: medium
+    condition: "单请求空 filename=\"\" 字段数远超业务基线"
+  - id: HUNT-008
+    name: "PHP 进程派生 shell"
+    confidence: high
+    condition: "php-fpm/httpd 子进程为 sh/bash/dash/perl/python/curl/wget/nc"
+  - id: HUNT-009
+    name: "Web 目录新增可执行文件"
+    confidence: high
+    condition: "mtime > 2026-10-17 且扩展名 ∈ {php,phtml,php3,php4,php5,phar} 且非发布窗口"
+  - id: HUNT-010
+    name: "可疑外连"
+    confidence: high
+    condition: "web worker 出站至非常规端口或非常规地域"
+  - id: HUNT-011
+    name: "持久化痕迹"
+    confidence: high
+    condition: "新增 cron / systemd unit / authorized_keys / UID 0 账户"
+  - id: HUNT-012
+    name: "时间线关联升级"
+    confidence: high
+    condition: "10 分钟窗口内共现 >= 3 类规则命中 → 疑似失陷"
+
+detection_limits:
+  - "成功利用可能既不崩溃也不报错，返回 HTTP 200 —— 日志干净不等于安全"
+  - "版本号可被隐藏、改写或伪造，远程头信息不可作为定性依据"
+  - "发行版可能回移补丁而不改版本号，版本比对会误报"
+  - "EOL 分支装了该分支最新版仍然受影响"
+  - "存在多版本共存时，必须锁定 Web 实际加载的二进制"
+  - "公开 PoC 大量不可用或为恶意伪造代码，禁止在客户环境直接运行"
+
+references:
+  - "https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w"
+  - "https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp"
+  - "https://www.php.net/archive/2026.php#2026-10-21-5"
+  - "https://www.wiz.io/blog/php2shell-php-rce"
+  - "https://securitylabs.datadoghq.com/articles/php2shell-critical-vulnerabilities-in-php/"
+  - "https://securelist.com/tr/php2shell-critical-vulnerabilities-in-php/121596/"
+
+signature:
+  algorithm: ed25519
+  public_key_id: p2s-rules-2026
+  value: ""    # 发布时由签名工具填充

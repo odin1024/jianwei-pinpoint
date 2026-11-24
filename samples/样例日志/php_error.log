@@ -1,0 +1,6 @@
+[20-Oct-2026 03:14:22 UTC] PHP Fatal error:  Allowed memory size of 16777216 bytes exhausted (tried to allocate 3500032 bytes) in Unknown on line 0
+[20-Oct-2026 03:14:25 UTC] PHP Fatal error:  Allowed memory size of 16777216 bytes exhausted (tried to allocate 3500032 bytes) in Unknown on line 0
+[20-Oct-2026 03:26:40 UTC] PHP Fatal error:  Allowed memory size of 16777216 bytes exhausted (tried to allocate 3500032 bytes) in Unknown on line 0
+[20-Oct-2026 03:14:31 UTC] PHP Warning:  Undefined array key "token" in /var/www/html/index.php on line 42
+[20-Oct-2026 03:15:03 UTC] PHP Notice:  session_start(): Session cannot be started after headers have already been sent in /var/www/html/.cache/a1b2c3.php on line 3
+[20-Oct-2026 03:14:29 UTC] PHP Fatal error:  Allowed memory size of 16777216 bytes exhausted (tried to allocate 3500032 bytes) in Unknown on line 0

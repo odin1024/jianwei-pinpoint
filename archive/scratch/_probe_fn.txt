@@ -1,0 +1,51 @@
+    # 服务识别（各端口并行，避免一台多端口设备串行等待）
+    services: list[Service] = []
+
+    def _probe_port(p: int) -> Optional[Service]:
+        """探测单个端口的服务，返回 Service（失败返回 None）。"""
+        if p == 22:
+            return probe_ssh(host, p, timeout=http_timeout)
+
+        if p in WEB_HTTPS_PORTS:
+            svc = probe_http(host, p, https=True, timeout=http_timeout)
+            if svc is None:
+                return None
+            subject, issuer, san, expired = _tls_info(host, p, timeout=http_timeout)
+            svc.tls_subject, svc.tls_issuer, svc.tls_san, svc.tls_expired = subject, issuer, san, expired
+            if subject:
+                svc.proto = "https"
+            return svc
+
+        if p in AMBIGUOUS_WEB_PORTS:
+            # 安全设备常把管理界面挂在非标准端口，且默认走 TLS
+            svc = probe_http(host, p, https=True, timeout=http_timeout)
+            if svc is None:
+                return None
+            if svc.http_status in (400, 404, 405, 501) and not svc.tls_subject:
+                alt = probe_http(host, p, https=False, timeout=http_timeout)
+                if alt is not None and alt.http_status in _OK_STATUS:
+                    svc = alt
+            if svc.http_status in _OK_STATUS and svc.proto == "https":
+                subject, issuer, san, expired = _tls_info(host, p, timeout=http_timeout)
+                svc.tls_subject, svc.tls_issuer, svc.tls_san, svc.tls_expired = subject, issuer, san, expired
+            return svc
+
+        if p in WEB_HTTP_PORTS:
+            return probe_http(host, p, https=False, timeout=http_timeout)
+
+        if p in (21, 25, 110, 143, 465, 587, 993):
+            return probe_banner(host, p, timeout=http_timeout)
+
+        return probe_banner(host, p, timeout=min(http_timeout, 4.0))
+
+    with ThreadPoolExecutor(max_workers=min(12, max(1, len(open_ports)))) as ex:
+        futs = {ex.submit(_probe_port, p): p for p in open_ports}
+        for f in as_completed(futs):
+            try:
+                svc = f.result()
+            except Exception:
+                svc = None
+            if svc is not None:
+                services.append(svc)
+    services.sort(key=lambda s: s.port)
+    prof.services = [s for s in services if s is not None]

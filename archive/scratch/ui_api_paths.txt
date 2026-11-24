@@ -1,0 +1,13 @@
+/api/assets
+/api/assets/export
+/api/assets/rescan
+/api/discover
+/api/ioc
+/api/overview
+/api/php-exposure
+/api/rules
+/api/rules/export/
+/api/scan/host
+/api/scan/logs
+/api/scans
+/api/scans/

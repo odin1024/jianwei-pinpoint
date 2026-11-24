@@ -1,0 +1,280 @@
+{
+  "scan_id": "logs-22313fb14c",
+  "kind": "logs",
+  "started_at": "2026-10-29T11:26:44",
+  "finished_at": "2026-10-29T11:26:44",
+  "risk": "critical",
+  "target_count": 10,
+  "severity_counts": {
+    "critical": 3,
+    "high": 2,
+    "medium": 6,
+    "low": 4,
+    "info": 1
+  },
+  "assets": [],
+  "findings": [
+    {
+      "rule_id": "P2S-REQ-001",
+      "rule_name": "multipart 请求体含 PHP_SESSION_UPLOAD_PROGRESS",
+      "severity": "critical",
+      "dimension": "request",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T14:05:33+00:00",
+      "ip": "198.51.100.77",
+      "uri": "/upload.php",
+      "evidence": "请求体命中 PHP_SESSION_UPLOAD_PROGRESS",
+      "description": "两个 CVE 的主攻击面。PHP 的 session.upload_progress 功能会在请求解析阶段发布会话/解码器状态，是预认证 UAF 的生产者。正常业务几乎不使用该字段。"
+    },
+    {
+      "rule_id": "P2S-REQ-001",
+      "rule_name": "multipart 请求体含 PHP_SESSION_UPLOAD_PROGRESS",
+      "severity": "critical",
+      "dimension": "request",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T14:06:10+00:00",
+      "ip": "198.51.100.78",
+      "uri": "/upload.php",
+      "evidence": "请求体命中 PHP_SESSION_UPLOAD_PROGRESS",
+      "description": "两个 CVE 的主攻击面。PHP 的 session.upload_progress 功能会在请求解析阶段发布会话/解码器状态，是预认证 UAF 的生产者。正常业务几乎不使用该字段。"
+    },
+    {
+      "rule_id": "P2S-REQ-003",
+      "rule_name": "上传 filename 中含 PHP 代码",
+      "severity": "critical",
+      "dimension": "request",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T14:05:33+00:00",
+      "ip": "198.51.100.77",
+      "uri": "/upload.php",
+      "evidence": "filename 含 PHP 代码: '[PHP-CODE-BLOCK len=28]'",
+      "description": "会话投毒：把 PHP 代码塞进上传文件名元数据，使其写入 session 文件，再通过本地文件包含（LFI）执行。"
+    },
+    {
+      "rule_id": "P2S-REQ-006",
+      "rule_name": "chunked 传输的 multipart POST",
+      "severity": "high",
+      "dimension": "request",
+      "cves": [
+        "CVE-2026-109618"
+      ],
+      "ts": "2026-10-21T14:06:10+00:00",
+      "ip": "198.51.100.78",
+      "uri": "/upload.php",
+      "evidence": "Transfer-Encoding: chunked + multipart/form-data",
+      "description": "缺少 Content-Length 的 multipart 请求可绕过 PHP 的 post_max_size 初始检查，持续投递 body 直至耗尽 memory_limit。"
+    },
+    {
+      "rule_id": "P2S-REQ-007",
+      "rule_name": "URL 参数中出现 session 文件路径",
+      "severity": "high",
+      "dimension": "request",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T13:45:11+00:00",
+      "ip": "192.0.2.55",
+      "uri": "/page.php?page=/var/lib/php/session/sess_p2sopchain000",
+      "evidence": "URI 含会话文件路径: /page.php?page=/var/lib/php/session/sess_p2sopchain000",
+      "description": "LFI 触发信号：请求参数引用 sess_xxx 会话文件路径，用于执行被投毒的会话。"
+    },
+    {
+      "rule_id": "P2S-REC-003",
+      "rule_name": "扫描器 User-Agent",
+      "severity": "medium",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T13:41:55+00:00",
+      "ip": "198.51.100.23",
+      "uri": "/index.php",
+      "evidence": "扫描器 User-Agent: php2shell-scan/109618",
+      "description": "已知的 php2shell 扫描器会在 User-Agent 中自报家门（php2shell-scan/*、p2srun/*）。这是无需请求体的最低成本检测点，标准访问日志即可覆盖。"
+    },
+    {
+      "rule_id": "P2S-REC-003",
+      "rule_name": "扫描器 User-Agent",
+      "severity": "medium",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T13:42:10+00:00",
+      "ip": "198.51.100.23",
+      "uri": "/index.php",
+      "evidence": "扫描器 User-Agent: php2shell-scan/109618",
+      "description": "已知的 php2shell 扫描器会在 User-Agent 中自报家门（php2shell-scan/*、p2srun/*）。这是无需请求体的最低成本检测点，标准访问日志即可覆盖。"
+    },
+    {
+      "rule_id": "P2S-REC-003",
+      "rule_name": "扫描器 User-Agent",
+      "severity": "medium",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T13:42:44+00:00",
+      "ip": "198.51.100.23",
+      "uri": "/index.php",
+      "evidence": "扫描器 User-Agent: php2shell-scan/109618",
+      "description": "已知的 php2shell 扫描器会在 User-Agent 中自报家门（php2shell-scan/*、p2srun/*）。这是无需请求体的最低成本检测点，标准访问日志即可覆盖。"
+    },
+    {
+      "rule_id": "P2S-REC-003",
+      "rule_name": "扫描器 User-Agent",
+      "severity": "medium",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T13:43:02+00:00",
+      "ip": "198.51.100.23",
+      "uri": "/index.php",
+      "evidence": "扫描器 User-Agent: php2shell-scan/109618",
+      "description": "已知的 php2shell 扫描器会在 User-Agent 中自报家门（php2shell-scan/*、p2srun/*）。这是无需请求体的最低成本检测点，标准访问日志即可覆盖。"
+    },
+    {
+      "rule_id": "P2S-REC-003",
+      "rule_name": "扫描器 User-Agent",
+      "severity": "medium",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T14:05:33+00:00",
+      "ip": "198.51.100.77",
+      "uri": "/upload.php",
+      "evidence": "扫描器 User-Agent: p2srun/1.0",
+      "description": "已知的 php2shell 扫描器会在 User-Agent 中自报家门（php2shell-scan/*、p2srun/*）。这是无需请求体的最低成本检测点，标准访问日志即可覆盖。"
+    },
+    {
+      "rule_id": "P2S-REC-003",
+      "rule_name": "扫描器 User-Agent",
+      "severity": "medium",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T14:06:10+00:00",
+      "ip": "198.51.100.78",
+      "uri": "/upload.php",
+      "evidence": "扫描器 User-Agent: p2srun/1.0",
+      "description": "已知的 php2shell 扫描器会在 User-Agent 中自报家门（php2shell-scan/*、p2srun/*）。这是无需请求体的最低成本检测点，标准访问日志即可覆盖。"
+    },
+    {
+      "rule_id": "P2S-REC-001",
+      "rule_name": "高频 upload_progress 探测",
+      "severity": "low",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T13:41:55+00:00",
+      "ip": "198.51.100.23",
+      "uri": "/index.php",
+      "evidence": "同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）",
+      "description": "同一来源在时间窗内反复发起 upload_progress 探测，判定为自动化扫描。"
+    },
+    {
+      "rule_id": "P2S-REC-001",
+      "rule_name": "高频 upload_progress 探测",
+      "severity": "low",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T13:42:10+00:00",
+      "ip": "198.51.100.23",
+      "uri": "/index.php",
+      "evidence": "同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）",
+      "description": "同一来源在时间窗内反复发起 upload_progress 探测，判定为自动化扫描。"
+    },
+    {
+      "rule_id": "P2S-REC-001",
+      "rule_name": "高频 upload_progress 探测",
+      "severity": "low",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T13:42:44+00:00",
+      "ip": "198.51.100.23",
+      "uri": "/index.php",
+      "evidence": "同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）",
+      "description": "同一来源在时间窗内反复发起 upload_progress 探测，判定为自动化扫描。"
+    },
+    {
+      "rule_id": "P2S-REC-001",
+      "rule_name": "高频 upload_progress 探测",
+      "severity": "low",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T13:43:02+00:00",
+      "ip": "198.51.100.23",
+      "uri": "/index.php",
+      "evidence": "同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）",
+      "description": "同一来源在时间窗内反复发起 upload_progress 探测，判定为自动化扫描。"
+    },
+    {
+      "rule_id": "P2S-REC-002",
+      "rule_name": "响应头暴露易受攻击的 PHP 版本",
+      "severity": "info",
+      "dimension": "recon",
+      "cves": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "ts": "2026-10-21T14:09:00+00:00",
+      "ip": "198.51.100.79",
+      "uri": "/x",
+      "evidence": "横幅暴露 8.4.26 -> vulnerable",
+      "description": "版本横幅泄露，结合版本判定即可给出风险等级。"
+    }
+  ],
+  "host_reports": [],
+  "coverage": {
+    "covered": [
+      "P2S-REQ-001",
+      "P2S-REQ-002",
+      "P2S-REQ-003",
+      "P2S-REQ-004",
+      "P2S-REQ-005",
+      "P2S-REQ-006",
+      "P2S-REQ-007",
+      "P2S-RES-003",
+      "P2S-REC-001",
+      "P2S-REC-003",
+      "P2S-REC-002"
+    ],
+    "uncovered": [
+      "P2S-RES-001",
+      "P2S-RES-002"
+    ],
+    "parsed_records": 10,
+    "total_lines": 10
+  },
+  "errors": []
+}

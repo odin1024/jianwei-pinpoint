@@ -1,20 +1,52 @@
+# ==========================================================================
+# 项目根 .gitignore
+#
+# 背景：仓库最初建在 app/ 里，导致项目根的文档（CHANGELOG 等）长期未纳入
+# 版本控制。2026-11-25 把 .git 上移到项目根，这份规则负责把根目录
+# 该忽略的东西挡在外面（构建产物、运行期数据、缓存）。
+# ==========================================================================
+
+# ---- 构建产物（不入库，发布时单独分发）----
+dist/
+build/
+*.egg-info/
+
+# ---- Python ----
 __pycache__/
 *.py[cod]
-*.egg-info/
-build/
-dist/
+*.pyd
 .venv/
 venv/
+env/
 .env
+.env.*
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .coverage
+.coverage.*
 htmlcov/
-reports/
+.tox/
+
+# ---- 运行期数据（含资产台账、扫描记录、加固票据，属于客户数据）----
 p2s-data/
-*.log
-data/
-!data/.gitkeep
-.run/
-.p2s-port
+app/p2s-data/
+*.p2s.bak.*
+*.p2s.state
+
+# ---- 测试与验证的临时产物 ----
+ui-verify/
+*.log.tmp
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- 备份 ----
+*.bak
+*.orig

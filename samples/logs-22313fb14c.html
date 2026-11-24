@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>php2shell 检测报告 logs-22313fb14c</title>
+<style>
+ body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;margin:0;background:#0f1115;color:#e6e6e6}
+ .wrap{max-width:1200px;margin:0 auto;padding:32px 24px}
+ h1{font-size:22px;margin:0 0 4px} .sub{color:#8b93a1;font-size:13px;margin-bottom:24px}
+ .cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+ .card{background:#171a21;border:1px solid #232733;border-radius:10px;padding:14px 18px;min-width:130px}
+ .card .k{color:#8b93a1;font-size:12px} .card .v{font-size:22px;font-weight:600;margin-top:4px}
+ table{width:100%;border-collapse:collapse;background:#141720;border-radius:10px;overflow:hidden;font-size:13px}
+ th,td{padding:9px 12px;text-align:left;border-bottom:1px solid #1e2230}
+ th{background:#1b1f29;color:#9aa3b2;font-weight:500}
+ .risk-critical{color:#ff6b6b;font-weight:700} .risk-high{color:#ffa94d;font-weight:700}
+ .risk-medium{color:#ffd43b} .risk-low{color:#69db7c}
+ .note{margin-top:24px;padding:14px 16px;background:#1a1420;border:1px solid #3a2436;border-radius:10px;font-size:13px;color:#d8c0d8}
+</style></head><body><div class="wrap">
+<h1>php2shell 检测报告</h1>
+<div class="sub">logs-22313fb14c · logs · 2026-10-29T11:26:44 → 2026-10-29T11:26:44</div>
+<div class="cards">
+ <div class="card"><div class="k">整体风险</div><div class="v risk-critical">CRITICAL</div></div>
+ <div class="card"><div class="k">目标数</div><div class="v">10</div></div>
+ <div class="card"><div class="k">命中</div><div class="v">16</div></div>
+ <div class="card"><div class="k">严重</div><div class="v">3</div></div>
+ <div class="card"><div class="k">高危</div><div class="v">2</div></div>
+</div>
+<h3 style="font-size:15px">资产结论</h3>
+<table><thead><tr><th>目标</th><th>PHP</th><th>SAPI</th><th>版本状态</th><th>探测</th><th>风险</th></tr></thead><tbody></tbody></table>
+<h3 style="font-size:15px;margin-top:24px">命中明细</h3>
+<table><thead><tr><th>规则</th><th>名称</th><th>等级</th><th>来源</th><th>证据</th></tr></thead><tbody><tr><td>P2S-REQ-001</td><td>multipart 请求体含 PHP_SESSION_UPLOAD_PROGRESS</td><td>critical</td><td>198.51.100.77</td><td>请求体命中 PHP_SESSION_UPLOAD_PROGRESS</td></tr><tr><td>P2S-REQ-001</td><td>multipart 请求体含 PHP_SESSION_UPLOAD_PROGRESS</td><td>critical</td><td>198.51.100.78</td><td>请求体命中 PHP_SESSION_UPLOAD_PROGRESS</td></tr><tr><td>P2S-REQ-003</td><td>上传 filename 中含 PHP 代码</td><td>critical</td><td>198.51.100.77</td><td>filename 含 PHP 代码: '[PHP-CODE-BLOCK len=28]'</td></tr><tr><td>P2S-REQ-006</td><td>chunked 传输的 multipart POST</td><td>high</td><td>198.51.100.78</td><td>Transfer-Encoding: chunked + multipart/form-data</td></tr><tr><td>P2S-REQ-007</td><td>URL 参数中出现 session 文件路径</td><td>high</td><td>192.0.2.55</td><td>URI 含会话文件路径: /page.php?page=/var/lib/php/session/sess_p2sopchain000</td></tr><tr><td>P2S-REC-003</td><td>扫描器 User-Agent</td><td>medium</td><td>198.51.100.23</td><td>扫描器 User-Agent: php2shell-scan/109618</td></tr><tr><td>P2S-REC-003</td><td>扫描器 User-Agent</td><td>medium</td><td>198.51.100.23</td><td>扫描器 User-Agent: php2shell-scan/109618</td></tr><tr><td>P2S-REC-003</td><td>扫描器 User-Agent</td><td>medium</td><td>198.51.100.23</td><td>扫描器 User-Agent: php2shell-scan/109618</td></tr><tr><td>P2S-REC-003</td><td>扫描器 User-Agent</td><td>medium</td><td>198.51.100.23</td><td>扫描器 User-Agent: php2shell-scan/109618</td></tr><tr><td>P2S-REC-003</td><td>扫描器 User-Agent</td><td>medium</td><td>198.51.100.77</td><td>扫描器 User-Agent: p2srun/1.0</td></tr><tr><td>P2S-REC-003</td><td>扫描器 User-Agent</td><td>medium</td><td>198.51.100.78</td><td>扫描器 User-Agent: p2srun/1.0</td></tr><tr><td>P2S-REC-001</td><td>高频 upload_progress 探测</td><td>low</td><td>198.51.100.23</td><td>同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）</td></tr><tr><td>P2S-REC-001</td><td>高频 upload_progress 探测</td><td>low</td><td>198.51.100.23</td><td>同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）</td></tr><tr><td>P2S-REC-001</td><td>高频 upload_progress 探测</td><td>low</td><td>198.51.100.23</td><td>同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）</td></tr><tr><td>P2S-REC-001</td><td>高频 upload_progress 探测</td><td>low</td><td>198.51.100.23</td><td>同源 3 次 upload_progress 探测，时间窗 60s（阈值 3/60s）</td></tr><tr><td>P2S-REC-002</td><td>响应头暴露易受攻击的 PHP 版本</td><td>info</td><td>198.51.100.79</td><td>横幅暴露 8.4.26 -&gt; vulnerable</td></tr></tbody></table>
+<div class="note"><b>处置：</b>唯一完整修复是升级到 PHP 8.5.12 / 8.4.27 / 8.3.36 / 8.2.35 并重启全部 worker。
+无法升级时按官方缓解建议设置 <code>session.upload_progress.enabled=0</code>、<code>memory_limit=-1</code>、
+收紧 <code>post_max_size</code>，PHP 8.5 另需 <code>fatal_error_backtraces=0</code>，并考虑将受影响的互联网暴露资产下线。</div>
+</div></body></html>
