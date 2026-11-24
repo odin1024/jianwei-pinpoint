@@ -7,6 +7,7 @@ async function loadAbout(c){
     return;
   }
   const sc=a.scope||{}, rt=a.runtime||{}, ru=a.rules||{}, da=a.data||{};
+  const mk=a.patch_markers||{};
 
   c.innerHTML=`
   <div class="page-head"><div><h2>关于</h2>
@@ -34,6 +35,26 @@ async function loadAbout(c){
       <tbody>${(a.capabilities||[]).map(x=>`<tr>
         <td><b>${esc(x.k)}</b></td><td class="muted">${esc(x.v)}</td></tr>`).join('')}</tbody>
     </table></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="card-h"><h3>补丁标记库</h3><div class="sp"></div>
+      <span class="muted" style="font-size:var(--fs-xs)">
+        ${mk.all_branches_distinguishable
+          ? '实测 ' + esc(mk.verified_on || '') + ' · 三分支全部可区分'
+          : '⚠ 存在不可区分的标记'}</span></div>
+    <div class="card-b">
+      <div style="font-size:var(--fs-xs);color:var(--text-2);line-height:1.9">
+        判定「是否已打补丁」靠二进制标记与运行时探针，<b>不只看版本号</b> ——
+        版本号是声明，标记是证据。来源：官方镜像配对提取
+        （${(mk.branches||[]).map(x=>`${esc(x.unpatched)} vs ${esc(x.patched)}`).join(' · ')}）。
+      </div>
+      <div style="margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-xs)">
+        <span>二进制标记 <b>${mk.binary_markers||0}</b> 条</span>
+        <span>运行时探针 <b>${mk.runtime_probes||0}</b> 条</span>
+        <span>覆盖分支 <b>${(mk.branches||[]).length}</b> 个</span>
+      </div>
+    </div>
   </div>
 
   <div class="row" style="margin-top:14px;align-items:stretch">

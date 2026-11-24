@@ -133,7 +133,10 @@ def api_about() -> dict:
     except Exception:
         assets = 0
 
+    from ..core import patchmarkers
+
     return {
+        "patch_markers": patchmarkers.summary(),
         "product": "见微 Pinpoint",
         "tagline": "PHP2Shell 暴露面核查与加固",
         "version": __version__,

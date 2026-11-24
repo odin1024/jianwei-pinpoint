@@ -33,6 +33,61 @@
 
 ---
 
+## [1.4.0] - 2026-11-25
+
+主题：**补丁标记库落地（用二进制证据替代版本号猜测）**
+
+### 一、为什么要做
+版本号是**声明**，标记是**证据**。仅凭版本号会陷入两难：
+- 版本低于基线 → 可能已被发行版回移补丁（Debian/Ubuntu 常见）
+- 版本达标 → 也可能被降级或伪造
+
+### 二、数据来源（全部实测，可追溯）
+在实验场（实验场）从官方镜像提取 `/usr/local/bin/php`，
+对**配对版本**做可打印字符串集合差，再逐条在三个分支验证可区分性：
+
+| 分支 | 未补丁 | 已补丁 | 二进制 sha256（前 16）|
+|---|---|---|---|
+| 8.2 | 8.2.34-fpm | 8.2.35-fpm | 254029359cc4147d… / ac2bc9e674054bea… |
+| 8.3 | 8.3.35-fpm | 8.3.36-fpm | e2f7e40577da6ca4… / fc263e1b8e9c6d5e… |
+| 8.4 | 8.4.26-cli | 8.4.27-cli | 1aeefba43892624b… / 6be05bcceb1373d9… |
+
+### 三、6 条二进制标记（三分支 6/6 全部可区分）
+| 标记 | 内容 | 含义 |
+|---|---|---|
+| MK-OOM-SYM-1 | `zend_handle_delayed_oom` | 修复引入的延迟 OOM 入口 |
+| MK-OOM-SYM-2 | `zend_set_memory_hard_limit_percent` | 修复新增的硬上限函数 |
+| MK-OOM-CFG-1 | `memory_hard_limit_percent` | 修复新增的 ini 指令名 |
+| MK-OOM-MSG-1 | `Hard memory limit of … exhausted` | 修复新增的提示文案 |
+| MK-OOM-MSG-2 | `Out of memory (allocated …)` **消失** | 旧文案被改写 |
+| MK-OOM-CFG-2 | `memory_hard_limit_percent must be >= 100, or -1` | 参数校验文案 |
+
+另含运行时探针：`ini_get('memory_hard_limit_percent')` →
+
+```
+未补丁 → bool(false)       补丁 → string(0) ""
+```
+
+### 四、判定原则（`core/patchmarkers.py`）
+1. 正向标记命中 → `patched`
+2. 旧版标记仍在（旧 OOM 文案）→ `unpatched`
+3. 两者同时命中 → `conflict`，交人工，不猜
+4. 都不满足 → `unknown`
+
+**特别处理**：单靠"旧字符串不存在"**不足以**判已补丁（任意非 PHP 文件都不含它），
+该信号只作弱提示，必须配合正向标记才判 `patched`。
+
+### 五、验证
+- `tests/test_patchmarkers.py` 15 项（含"不得因找不到标记就判未补丁"的回归）；
+- **真实二进制复验**：取回 21.8 MB 真 php 二进制本地判定 →
+  8.4.26 `unpatched` / 8.4.27 `patched`，6 条标记全部命中，结论正确；
+- 「关于」页新增标记库卡片，显示三分支配对与可区分性状态。
+
+### 回归
+`pytest 532 passed`（+15）/ ruff / 16 页审计全绿。
+
+---
+
 ## [1.3.0] - 2026-11-25
 
 主题：**Windows 加固能力落地（harden.ps1 + IIS/权限规则 + 真机行为测试）**
