@@ -33,6 +33,41 @@
 
 ---
 
+## [1.5.3] - 2026-11-25
+
+主题：**CI 首次运行暴露的三个问题（跨平台测试、挂起、无观测）**
+
+### 一、跨平台测试缺陷（真 bug）
+`test_log_path_outside_allowlist_rejected` 写死了 `C:\Windows\win.ini`：
+
+- Windows 上该文件存在 → 越界 → **403**（测试通过）
+- Linux 上该文件不存在 → `_resolve_log_path` 先报"日志文件不存在" → **400**
+
+于是同一个逻辑在 CI 的 ubuntu 上必然失败。改为按平台选择"存在但越界"的文件
+（Windows 用 `C:\Windows\win.ini`，POSIX 用 `/etc/os-release`），
+两端都应得到 403。
+
+### 二、CI 挂起且无任何观测
+ubuntu 的 `单元测试` 步骤静默挂起 **25 分钟**（Windows 同套用例通过）。
+更糟的是：默认 job 超时是 6 小时，且 `pytest -q` 不打印正在跑哪个用例，
+失败后也没法定位。
+
+修复：
+| 改动 | 作用 |
+|---|---|
+| `pytest --timeout=120 --timeout-method=thread` | 任何用例挂起 2 分钟内失败并打印栈 |
+| `pytest -v` | 失败时直接看出是哪个用例 |
+| 各 job 加 `timeout-minutes` | test 25 / contract 15 / scripts 10 / ui-gates 20 |
+| `dev` extra 增加 `pytest-timeout>=2.3` | 保证 CI 有该插件 |
+
+### 三、验证方式
+把源码打包到另一台 Linux（Ubuntu 22.04 / py3.10）复跑全量：
+`1 failed, 527 passed, 18 skipped in 69.33s` —— **没有挂起**。
+唯一失败就是上面那个平台相关测试，已修。说明挂起是 GitHub runner 环境特有，
+因此必须让 CI 自己"说出"卡在哪一步，而不是靠猜。
+
+---
+
 ## [1.5.2] - 2026-11-25
 
 主题：**修复"发布包缺文件"—— .gitignore 误伤必需数据**

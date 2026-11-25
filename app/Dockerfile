@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # ---- 运行阶段 ----
 FROM python:3.12-slim
 LABEL org.opencontainers.image.title="p2s" \
-      org.opencontainers.image.version="1.5.2" \
+      org.opencontainers.image.version="1.5.3" \
       org.opencontainers.image.description="php2shell 检测控制台 (CVE-2026-109618 / CVE-2026-109619)"
 
 RUN useradd -r -u 10001 -m -d /app p2s && \

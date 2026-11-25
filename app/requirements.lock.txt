@@ -1,25 +1,23 @@
-# ==========================================================================
-# 依赖锁定文件（由已验证环境导出）
+﻿# ==========================================================================
+# 渚濊禆閿佸畾鏂囦欢锛堢敱宸查獙璇佺幆澧冨鍑猴級
 #
-# 作用：pyproject.toml 只声明版本范围（如 httpx>=0.24,<1），换个时间
-# pip install 会解析到新版，可能引入行为变化。这份文件把"已验证通过的那一套
-# 版本"固定下来，保证交付与 CI 可复现。
+# 浣滅敤锛歱yproject.toml 鍙０鏄庣増鏈寖鍥达紙濡?httpx>=0.24,<1锛夛紝鎹釜鏃堕棿
+# pip install 浼氳В鏋愬埌鏂扮増锛屽彲鑳藉紩鍏ヨ涓哄彉鍖栥€傝繖浠芥枃浠舵妸"宸查獙璇侀€氳繃鐨勯偅涓€濂?
+# 鐗堟湰"鍥哄畾涓嬫潵锛屼繚璇佷氦浠樹笌 CI 鍙鐜般€?
 #
-# 用法：
-#   pip install -r requirements.lock.txt        # 精确复现运行/开发环境
-#   pip install -e ".[cloudtest]"               # 另需云端实验场脚本时再加
+# 鐢ㄦ硶锛?
+#   pip install -r requirements.lock.txt        # 绮剧‘澶嶇幇杩愯/寮€鍙戠幆澧?
+#   pip install -e ".[cloudtest]"               # 鍙﹂渶浜戠瀹為獙鍦鸿剼鏈椂鍐嶅姞
 #
-# 注意：本文件**不含** paramiko 及其依赖（那属于 cloudtest extra，
-# 只在开发机上驱动云端实验场时使用，不是产品运行依赖）。
+# 娉ㄦ剰锛氭湰鏂囦欢**涓嶅惈** paramiko 鍙婂叾渚濊禆锛堥偅灞炰簬 cloudtest extra锛?
+# 鍙湪寮€鍙戞満涓婇┍鍔ㄤ簯绔疄楠屽満鏃朵娇鐢紝涓嶆槸浜у搧杩愯渚濊禆锛夈€?
 #
-# 更新时机：依赖升级后跑完全部门禁再重新导出，并在 CHANGELOG 记一笔。
-# 生成：.venv\Scripts\python.exe -m pip freeze（过滤 cloudtest 闭包后排序）
+# 鏇存柊鏃舵満锛氫緷璧栧崌绾у悗璺戝畬鍏ㄩ儴闂ㄧ鍐嶉噸鏂板鍑猴紝骞跺湪 CHANGELOG 璁颁竴绗斻€?
+# 鐢熸垚锛?venv\Scripts\python.exe -m pip freeze锛堣繃婊?cloudtest 闂寘鍚庢帓搴忥級
 # ==========================================================================
 
 Jinja2==3.1.6
-MarkupSafe==3.0.4
-PyYAML==6.0.3
-Pygments==2.21.0
+# Editable Git install with no remote (p2s==0.1.0)
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
@@ -32,16 +30,21 @@ httpcore==1.0.9
 httpx==0.28.1
 idna==3.20
 iniconfig==2.3.1
+Jinja2==3.1.6
+MarkupSafe==3.0.4
 opentelemetry-api==1.45.1
 packaging==26.3
 pluggy==1.7.0
-pydantic==2.14.1
 pydantic_core==2.50.1
+pydantic==2.14.1
+Pygments==2.21.0
 pytest==9.2.0
+pytest-timeout==2.4.0
 python-multipart==0.0.32
+PyYAML==6.0.3
 ruff==0.17.3
 starlette==1.10.0
-typing-inspection==0.4.4
 typing_extensions==4.16.0
+typing-inspection==0.4.4
 uvicorn==0.54.0
 websocket-client==1.9.2

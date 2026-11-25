@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import json
+import pathlib
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -79,7 +81,13 @@ def test_logout_invalidates_session():
 # 日志路径白名单
 # --------------------------------------------------------------------------
 def test_log_path_outside_allowlist_rejected(auth_client):
-    r = auth_client.post("/api/jobs", json={"kind": "logs", "path": r"C:\Windows\win.ini"})
+    # 必须选一个**当前系统上确实存在**、但在日志白名单之外的文件：
+    #   不存在 → 400（"日志文件不存在"）；存在但越界 → 403（"不在允许的目录内"）
+    # 原实现写死 C:\Windows\win.ini，在 Linux 上该路径不存在，于是永远拿到 400。
+    outside = r"C:\Windows\win.ini" if sys.platform == "win32" else "/etc/os-release"
+    if not pathlib.Path(outside).exists():
+        pytest.skip(f"当前系统没有可用于越界测试的文件：{outside}")
+    r = auth_client.post("/api/jobs", json={"kind": "logs", "path": outside})
     assert r.status_code == 403
     assert "允许的目录" in r.json()["detail"]
 

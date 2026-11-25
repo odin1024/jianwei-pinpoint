@@ -36,6 +36,9 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 OWNER = "odin1024"
 REPO = "jianwei-pinpoint"
+# 供 push_incremental.py 复用
+CTRL_OWNER = OWNER
+CTRL_REPO = REPO
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 CKPT = Path(__file__).with_name("replay_checkpoint.json")
 GIT = "git"

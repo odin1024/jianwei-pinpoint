@@ -18,6 +18,7 @@ jobs:
   test:
     name: 测试 · ${{ matrix.os }} · py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -44,12 +45,14 @@ jobs:
         run: python -m ruff check src tests scripts
 
       - name: 单元测试
+        # --timeout：任何用例挂起都在 120 秒内失败并打印栈，
+        # 而不是让 job 跑满默认 6 小时（曾发生过：ubuntu 上 pytest 静默挂起 25 分钟）
+        # -v：失败时能直接看出是哪个用例
         env:
-          # 测试必须用固定口令，不能受开发者 shell 环境影响
           P2S_CONSOLE_PASSWORD: test-pass
           P2S_ADMIN_PASSWORD: test-pass
           P2S_AGENT_TOKEN: test-agent-token
-        run: python -m pytest -q
+        run: python -m pytest -v --timeout=120 --timeout-method=thread -p no:cacheprovider
 
       - name: 载荷守护
         run: python scripts/check_payload_literals.py .
@@ -66,6 +69,7 @@ jobs:
   contract:
     name: 接口契约 · ubuntu · py3.12
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -92,6 +96,7 @@ jobs:
   agent-scripts:
     name: 采集脚本语法 · ubuntu · py3.12
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -135,6 +140,7 @@ jobs:
   ui-gates:
     name: 界面门禁 · ubuntu · py3.12
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
