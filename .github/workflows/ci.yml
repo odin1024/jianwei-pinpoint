@@ -154,6 +154,14 @@ jobs:
           pip install -e . --no-deps
         name: 安装依赖
 
+      # 布局门禁测量的是真实渲染尺寸。Ubuntu runner 默认没有中文字体，
+      # 汉字回退成方块会让行高/列宽与开发机不一致（曾导致 rowHeight 96 vs 49）。
+      - name: 安装中文字体（保证排版测量稳定）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          fc-cache -f >/dev/null
+
       - name: 启动控制台
         env:
           P2S_ADMIN_PASSWORD: ci-pass

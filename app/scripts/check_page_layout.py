@@ -5,11 +5,14 @@
 """
 from __future__ import annotations
 
+import http.cookiejar
 import json
 import pathlib
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -184,7 +187,69 @@ class C:
         return r.get("result", {}).get("value")
 
 
+
+# ---------------------------------------------------------------------------
+# 门禁自备数据：测量资产页前先确保表格里有行，测完清理
+# ---------------------------------------------------------------------------
+SEED_HOSTS = ["127.0.0.71", "127.0.0.72", "127.0.0.73"]
+SEED_GROUP = "ui-gate"
+
+
+#: 共享 Cookie：所有请求必须复用同一会话，否则每次都是未登录（401）
+_JAR = http.cookiejar.CookieJar()
+_OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_JAR))
+
+
+def _http(method: str, path: str, body: dict | None = None) -> tuple[int, str]:
+    """极简 HTTP 调用（复用已装的 urllib，带 Cookie，不引第三方依赖）。"""
+    url = BASE + path
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers={
+        "Content-Type": "application/json",
+    })
+    try:
+        with _OPENER.open(req, timeout=30) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+
+
+def _login() -> None:
+    _http("POST", "/api/login", json.loads(credentials_json()))
+
+
+def _existing_hosts() -> set[str]:
+    code, body = _http("GET", "/api/assets")
+    if code != 200:
+        print(f"  [WARN] 读取资产失败 HTTP {code}（登录态可能无效）")
+        return set()
+    return {a.get("host") for a in json.loads(body).get("assets", [])}
+
+
+def _seed_assets() -> list[str]:
+    """确保资产页至少有 3 行，返回本次新建的 host 列表（供清理）。"""
+    _login()
+    before = _existing_hosts()
+    created: list[str] = []
+    for host in SEED_HOSTS:
+        if host in before:
+            continue
+        code, _ = _http("POST", "/api/assets",
+                        {"host": host, "group": SEED_GROUP, "note": "布局门禁临时数据"})
+        if code in (200, 201):
+            created.append(host)
+    print(f"门禁自备数据：新建 {len(created)} 台（原有 {len(before)} 台）")
+    return created
+
+
+def _cleanup_assets(created: list[str]) -> None:
+    for host in created:
+        _http("DELETE", f"/api/assets?host={urllib.parse.quote(host)}")
+    if created:
+        print(f"已清理门禁临时资产 {len(created)} 台")
+
 def main() -> int:
+    created = _seed_assets()
     proc = launch()
     fails: list[str] = []
     try:
@@ -284,6 +349,7 @@ def main() -> int:
             fails.append(f"报告中心 1200px 横向溢出 {nar2['overflow']}px（{nar2['worst']}）")
     finally:
         proc.terminate()
+        _cleanup_assets(created)
 
     if fails:
         print("\n[FAIL] 布局检查未通过：")

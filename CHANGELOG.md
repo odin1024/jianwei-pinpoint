@@ -33,6 +33,48 @@
 
 ---
 
+## [1.5.4] - 2026-11-25
+
+主题：**CI 第二轮：修掉三处"只有换环境才暴露"的缺陷**
+
+第一次让 CI 真正跑起来后，Windows 与界面门禁双双失败。三处根因都不在本机复现：
+
+### 一、`Get-FileHash` 在 GitHub runner 上不存在（9 个用例连带失败）
+Windows 加固脚本用 `Get-FileHash` 算 sha256。在 windows-latest 上该 cmdlet 报
+`CommandNotFoundException`——`Microsoft.PowerShell.Utility` 模块解析失败。
+（本机 PowerShell 5.1 正常，所以本地 11 项测试全过。）
+
+改为**纯 .NET 实现**，不依赖任何 PowerShell 模块：
+
+```powershell
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$fs  = [System.IO.File]::OpenRead($p)
+$hash = $sha.ComputeHash($fs)   # → hex 小写
+```
+
+同时把 `Set-Content` 换成 `[IO.File]::WriteAllText`（同属 Management 模块，风险相同）。
+
+### 二、布局门禁依赖"机器上恰好有数据"
+CI 报 `rowHeight=96（应 <=70）`、`actDisplay=MISSING`。
+根因不是样式坏了，而是 **CI 的 `p2s-data` 是空的**：
+没有资产 → 表格没有行 → `.act` 元素不存在 → 量到的是空状态 div 的高度。
+
+门禁不能依赖环境数据，否则它测的是环境而不是代码。
+现在 `check_page_layout.py` **自备数据**：测量前用 API 建 3 台回环资产，
+测完删除（带 Cookie 会话，失败会打印 WARN）。
+
+已实测：**清空 assets.json 后门禁仍通过**（自造 3 台 → rowHeight 49 → 清理还原）。
+
+### 三、CI 缺中文字体，排版测量不可信
+Ubuntu runner 默认无 CJK 字体，汉字回退方块会让行高/列宽与开发机不同。
+ui-gates 增加 `apt-get install fonts-noto-cjk` + `fc-cache -f`。
+
+### 回归
+`pytest 546 passed` / ruff / 布局门禁 / 16 页审计全绿（本机）。
+CI 侧待下一轮验证。
+
+---
+
 ## [1.5.3] - 2026-11-25
 
 主题：**CI 首次运行暴露的三个问题（跨平台测试、挂起、无观测）**

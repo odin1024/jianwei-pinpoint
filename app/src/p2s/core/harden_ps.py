@@ -51,8 +51,15 @@ function Die([int]$code, [string]$m) {
 }
 
 function Get-FileSha([string]$p) {
+    # 不用 Get-FileHash：某些环境（如 GitHub Actions 的 Windows runner）
+    # 里 Microsoft.PowerShell.Utility 模块解析失败，该 cmdlet 直接不存在。
+    # 改为纯 .NET 实现，不依赖任何 PowerShell 模块。
     if (-not (Test-Path -LiteralPath $p)) { return '' }
-    return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLower()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $fs = [System.IO.File]::OpenRead($p)
+    try { $hash = $sha.ComputeHash($fs) }
+    finally { $fs.Dispose(); $sha.Dispose() }
+    return (($hash | ForEach-Object { $_.ToString('x2') }) -join '')
 }
 
 # ---- 编码安全的 ini 读写 ---------------------------------------------------
@@ -231,8 +238,8 @@ if (-not $okAll) {
 Say '[5/5] 完成'
 $after = Get-FileSha $Target
 $stateFile = "$Target.p2s.state"
-Set-Content -LiteralPath $stateFile -Encoding UTF8 -Value @(
-    "after_sha=$after", "backup=$Backup")
+[IO.File]::WriteAllText($stateFile,
+    "after_sha=$after`r`nbackup=$Backup`r`n", (New-Object Text.UTF8Encoding($false)))
 
 $receipt = [ordered]@{
     host = $HostName; target = $Target
@@ -242,8 +249,9 @@ $receipt = [ordered]@{
 }
 $receiptPath = Join-Path $env:TEMP ("p2s-harden-receipt-" +
     (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json')
-$receipt | ConvertTo-Json -Depth 5 |
-    Set-Content -LiteralPath $receiptPath -Encoding UTF8
+[IO.File]::WriteAllText($receiptPath,
+    ($receipt | ConvertTo-Json -Depth 5),
+    (New-Object Text.UTF8Encoding($false)))
 Say "  回执：$receiptPath"
 Say '  把该文件内容贴回平台「加固回执」即完成闭环'
 if (-not $TargetIsCli) { Say '  注意：目标是 FPM/Apache/IIS 的 ini，必须重启对应服务才生效' }
@@ -263,8 +271,15 @@ $ExpectSha = '__BEFORE_SHA__'
 $StateFile = "$Target.p2s.state"
 
 function Get-FileSha([string]$p) {
+    # 不用 Get-FileHash：某些环境（如 GitHub Actions 的 Windows runner）
+    # 里 Microsoft.PowerShell.Utility 模块解析失败，该 cmdlet 直接不存在。
+    # 改为纯 .NET 实现，不依赖任何 PowerShell 模块。
     if (-not (Test-Path -LiteralPath $p)) { return '' }
-    return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLower()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $fs = [System.IO.File]::OpenRead($p)
+    try { $hash = $sha.ComputeHash($fs) }
+    finally { $fs.Dispose(); $sha.Dispose() }
+    return (($hash | ForEach-Object { $_.ToString('x2') }) -join '')
 }
 
 $Backup = Get-ChildItem -LiteralPath (Split-Path -Parent $Target) `
