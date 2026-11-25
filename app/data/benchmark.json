@@ -1,0 +1,97 @@
+{
+  "generated_at": "2026-11-25T01:48:40",
+  "host": "lab-host",
+  "note": "检测端只允许以 127.0.0.1:<port> 视角访问，不得读取容器内部",
+  "cases": [
+    {
+      "id": "BASE-8426-cli",
+      "container": "base-8426",
+      "image": "php:8.4.26-cli",
+      "endpoint": "http://127.0.0.1:18426/",
+      "truth": {
+        "php_version": "8.4.26",
+        "patched": false,
+        "why": "未补丁基线，暴露于两个 CVE"
+      },
+      "access": {
+        "host": "127.0.0.1",
+        "port": 18426
+      }
+    },
+    {
+      "id": "BASE-8427-cli",
+      "container": "base-8427",
+      "image": "php:8.4.27-cli",
+      "endpoint": "http://127.0.0.1:18427/",
+      "truth": {
+        "php_version": "8.4.27",
+        "patched": true,
+        "why": "已补丁基线，不应判为暴露"
+      },
+      "access": {
+        "host": "127.0.0.1",
+        "port": 18427
+      }
+    },
+    {
+      "id": "BASE-8234-fpm",
+      "container": "base-8234",
+      "image": "php:8.2.34-fpm",
+      "endpoint": "http://127.0.0.1:18234/",
+      "truth": {
+        "php_version": "8.2.34",
+        "patched": false,
+        "why": "8.2 分支未补丁"
+      },
+      "access": {
+        "host": "127.0.0.1",
+        "port": 18234
+      }
+    },
+    {
+      "id": "BASE-8235-fpm",
+      "container": "base-8235",
+      "image": "php:8.2.35-fpm",
+      "endpoint": "http://127.0.0.1:18235/",
+      "truth": {
+        "php_version": "8.2.35",
+        "patched": true,
+        "why": "8.2 分支已补丁"
+      },
+      "access": {
+        "host": "127.0.0.1",
+        "port": 18235
+      }
+    },
+    {
+      "id": "BASE-8335-fpm",
+      "container": "base-8335",
+      "image": "php:8.3.35-fpm",
+      "endpoint": "http://127.0.0.1:18335/",
+      "truth": {
+        "php_version": "8.3.35",
+        "patched": false,
+        "why": "8.3 分支未补丁"
+      },
+      "access": {
+        "host": "127.0.0.1",
+        "port": 18335
+      }
+    },
+    {
+      "id": "BASE-8336-fpm",
+      "container": "base-8336",
+      "image": "php:8.3.36-fpm",
+      "endpoint": "http://127.0.0.1:18336/",
+      "truth": {
+        "php_version": "8.3.36",
+        "patched": true,
+        "why": "8.3 分支已补丁"
+      },
+      "access": {
+        "host": "127.0.0.1",
+        "port": 18336
+      }
+    }
+  ]
+}

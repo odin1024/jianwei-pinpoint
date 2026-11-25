@@ -33,6 +33,52 @@
 
 ---
 
+## [1.5.2] - 2026-11-25
+
+主题：**修复"发布包缺文件"—— .gitignore 误伤必需数据**
+
+### 一、问题（发布到 GitHub 后立刻发现）
+`app/.gitignore` 里有一行 `data/`，本意是忽略运行时数据目录，但它匹配
+**任意层级的 data 目录**，于是把两个必需文件一并忽略了：
+
+| 文件 | 作用 | 后果 |
+|---|---|---|
+| `app/src/p2s/core/data/markers.json` | 补丁标记库（1.4.0 的核心数据）| `patchmarkers.load()` 启动即 `FileNotFoundError` |
+| `app/data/benchmark.json` | 基准集 | 无法复现准确率评测 |
+
+**本地一切正常**（文件在磁盘上），推到 GitHub 后仓库里根本没有这两个文件。
+这是最危险的一类缺陷：开发者的机器永远不会暴露，只有交付给别人才炸。
+
+### 二、修复
+- 移除 `.gitignore` 的 `data/` 规则（运行时数据目录是 `p2s-data/`，已在别处忽略），
+  并在原位置写明**为什么不能写 `data/`**；
+- 补入 `markers.json`、`benchmark.json`、`data/README.md`；
+- 将 `scripts/replay_checkpoint.json` 加入忽略（发布脚本的断点文件，属运行期产物）。
+
+### 三、新增门禁 `tests/test_package_data.py`（5 项）
+只检查**运行时按路径读取的数据文件**，不误伤新代码文件：
+
+| 用例 | 断言 |
+|---|---|
+| 包内数据目录全部被跟踪 | `src/p2s/core/data/*` 每个文件都在 `git ls-files` 里 |
+| 基准集目录全部被跟踪 | `app/data/*` 同上 |
+| `markers.json` 未被忽略 | `git check-ignore` 必须不命中 |
+| `benchmark.json` 未被忽略 | 同上 |
+| 数据文件位于包内 | 随 wheel 分发，不依赖当前工作目录 |
+
+**该门禁在修复前正确失败**（准确报出 3 个未跟踪文件），修复后通过。
+
+### 四、发布方式（记录在案）
+本机 `github.com` 被 SNI 阻断（`api.github.com` 可达），因此首次发布用
+**Git Data API 重放**而非 `git push`：41 个提交逐层重建
+（blob → tree → commit → ref），最终 `tree` sha 与本地**逐字节一致**。
+详见 [`docs/GITHUB-PUBLISH.md`](./docs/GITHUB-PUBLISH.md)。
+
+### 回归
+`pytest 546 passed`（+5）/ ruff 全过。
+
+---
+
 ## [1.5.1] - 2026-11-25
 
 主题：**发布就绪（Apache-2.0 许可、授权声明、文档数字门禁）**

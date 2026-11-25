@@ -1,0 +1,206 @@
+{
+  "schema": 1,
+  "generated_at": "2026-11-25",
+  "cves": [
+    "CVE-2026-109618",
+    "CVE-2026-109619"
+  ],
+  "provenance": {
+    "method": "从官方 Docker 镜像提取 /usr/local/bin/php，对配对版本做可打印字符串集合差，再逐条在三个分支上验证可区分性",
+    "host": "实验场",
+    "verified_on": "2026-11-25",
+    "note": "标记只在**这些确切构建**上实测过；发行版自行回移的补丁可能不同，因此 patched 需标记命中，unpatched 需未补丁标记命中，两者都不满足时结论应为 unknown 而不是猜测。"
+  },
+  "branches": [
+    {
+      "branch": "8.2",
+      "unpatched": {
+        "php_version": "8.2.34",
+        "image": "php:8.2.34-fpm",
+        "binary_sha256": "254029359cc4147d48eb15cf03abcadecfdee7e8b13fd62acec50f0a28570a98",
+        "binary_size": 18901328
+      },
+      "patched": {
+        "php_version": "8.2.35",
+        "image": "php:8.2.35-fpm",
+        "binary_sha256": "ac2bc9e674054bea256fa1b9ce8f9e062a04606ea24c2728dcfb4b080bce3308",
+        "binary_size": 18901360
+      }
+    },
+    {
+      "branch": "8.3",
+      "unpatched": {
+        "php_version": "8.3.35",
+        "image": "php:8.3.35-fpm",
+        "binary_sha256": "e2f7e40577da6ca4682ef982635642c4cac4f4313a1982499b090b3964c089aa",
+        "binary_size": 20998768
+      },
+      "patched": {
+        "php_version": "8.3.36",
+        "image": "php:8.3.36-fpm",
+        "binary_sha256": "fc263e1b8e9c6d5ef2ca10e82eb6b27dfd9c4de1378fe27d31340e24f67fd519",
+        "binary_size": 20998800
+      }
+    },
+    {
+      "branch": "8.4",
+      "unpatched": {
+        "php_version": "8.4.26",
+        "image": "php:8.4.26-cli",
+        "binary_sha256": "1aeefba43892624b683b72e83c3d314ddfe0f3155a77f88a0a58367ebb6b2977",
+        "binary_size": 21784624
+      },
+      "patched": {
+        "php_version": "8.4.27",
+        "image": "php:8.4.27-cli",
+        "binary_sha256": "6be05bcceb1373d9209c1c4f777d270cfee7eefc8232ddc5782fdd974889e61e",
+        "binary_size": 21784624
+      }
+    }
+  ],
+  "binary_markers": [
+    {
+      "id": "MK-OOM-SYM-1",
+      "kind": "binary_symbol",
+      "needle": "zend_handle_delayed_oom",
+      "verdict_if_present": "patched",
+      "why": "修复引入的延迟 OOM 处理入口。未补丁版本的 Zend 引擎没有这个符号。",
+      "confidence": "high"
+    },
+    {
+      "id": "MK-OOM-SYM-2",
+      "kind": "binary_symbol",
+      "needle": "zend_set_memory_hard_limit_percent",
+      "verdict_if_present": "patched",
+      "why": "修复新增的硬上限设置函数，与 memory_hard_limit_percent 指令配套。",
+      "confidence": "high"
+    },
+    {
+      "id": "MK-OOM-CFG-1",
+      "kind": "binary_string",
+      "needle": "memory_hard_limit_percent",
+      "verdict_if_present": "patched",
+      "why": "修复新增的 php.ini 指令名；未补丁版本二进制里不存在该串。",
+      "confidence": "high"
+    },
+    {
+      "id": "MK-OOM-MSG-1",
+      "kind": "binary_string",
+      "needle": "Hard memory limit of",
+      "verdict_if_present": "patched",
+      "why": "修复新增的硬上限触发提示文案。",
+      "confidence": "high"
+    },
+    {
+      "id": "MK-OOM-MSG-2",
+      "kind": "binary_string_absent",
+      "needle": "Out of memory (allocated",
+      "verdict_if_absent": "patched",
+      "why": "旧版 OOM 提示文案在补丁中被改写，因此**未补丁版本才含此串**。",
+      "confidence": "high"
+    },
+    {
+      "id": "MK-OOM-CFG-2",
+      "kind": "binary_string",
+      "needle": "memory_hard_limit_percent must be >= 100, or -1",
+      "verdict_if_present": "patched",
+      "why": "修复新增的参数校验文案，出现即说明该分支已含新指令实现。",
+      "confidence": "medium"
+    }
+  ],
+  "runtime_probes": [
+    {
+      "id": "MK-OOM-RT-1",
+      "kind": "runtime_ini_type",
+      "cve": [
+        "CVE-2026-109618",
+        "CVE-2026-109619"
+      ],
+      "probe": "php -r 'var_dump(ini_get(\"memory_hard_limit_percent\"));'",
+      "unpatched_value": "bool(false)",
+      "patched_value": "string(0) \"\"",
+      "why": "未补丁版本不认识该指令，ini_get 返回 false；补丁版本注册了该指令，未设置时返回空字符串。这是运行时层面最直接的判据。",
+      "confidence": "high"
+    }
+  ],
+  "verification_matrix": {
+    "8.2": {
+      "zend_handle_delayed_oom": {
+        "unpatched": false,
+        "patched": true
+      },
+      "zend_set_memory_hard_limit_percent": {
+        "unpatched": false,
+        "patched": true
+      },
+      "memory_hard_limit_percent": {
+        "unpatched": false,
+        "patched": true
+      },
+      "Hard memory limit of %zu bytes exhausted": {
+        "unpatched": false,
+        "patched": true
+      },
+      "Out of memory (allocated %zu bytes)": {
+        "unpatched": true,
+        "patched": false
+      },
+      "memory_hard_limit_percent must be >= 100, or -1": {
+        "unpatched": false,
+        "patched": true
+      }
+    },
+    "8.3": {
+      "zend_handle_delayed_oom": {
+        "unpatched": false,
+        "patched": true
+      },
+      "zend_set_memory_hard_limit_percent": {
+        "unpatched": false,
+        "patched": true
+      },
+      "memory_hard_limit_percent": {
+        "unpatched": false,
+        "patched": true
+      },
+      "Hard memory limit of %zu bytes exhausted": {
+        "unpatched": false,
+        "patched": true
+      },
+      "Out of memory (allocated %zu bytes)": {
+        "unpatched": true,
+        "patched": false
+      },
+      "memory_hard_limit_percent must be >= 100, or -1": {
+        "unpatched": false,
+        "patched": true
+      }
+    },
+    "8.4": {
+      "zend_handle_delayed_oom": {
+        "unpatched": false,
+        "patched": true
+      },
+      "zend_set_memory_hard_limit_percent": {
+        "unpatched": false,
+        "patched": true
+      },
+      "memory_hard_limit_percent": {
+        "unpatched": false,
+        "patched": true
+      },
+      "Hard memory limit of %zu bytes exhausted": {
+        "unpatched": false,
+        "patched": true
+      },
+      "Out of memory (allocated %zu bytes)": {
+        "unpatched": true,
+        "patched": false
+      },
+      "memory_hard_limit_percent must be >= 100, or -1": {
+        "unpatched": false,
+        "patched": true
+      }
+    }
+  }
+}

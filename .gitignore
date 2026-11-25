@@ -50,3 +50,6 @@ desktop.ini
 # ---- 备份 ----
 *.bak
 *.orig
+
+# 发布脚本的断点文件（含本地→远端 sha 映射，属运行期产物）
+replay_checkpoint.json

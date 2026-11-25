@@ -14,7 +14,8 @@ htmlcov/
 reports/
 p2s-data/
 *.log
-data/
-!data/.gitkeep
+# 运行时数据目录是 p2s-data/（已在上面忽略）。
+# 这里**不能**写 `data/`：app/data/ 放基准集、app/src/p2s/core/data/ 放补丁标记库，
+# 两者都是必需文件。历史上误写导致 markers.json 未入库、发布包不可用。
 .run/
 .p2s-port
