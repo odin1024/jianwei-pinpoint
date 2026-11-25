@@ -91,8 +91,15 @@ def main() -> int:
         check(r.content.startswith("\ufeff".encode()), "CSV 带 UTF-8 BOM（Excel 不乱码）")
 
         # 8) 日志路径白名单
-        r = c.post("/api/jobs", json={"kind": "logs", "path": r"C:\Windows\win.ini"})
-        check(r.status_code == 403, "白名单外的日志路径被拒绝", str(r.status_code))
+        # 必须选"当前系统上确实存在、但在日志白名单之外"的文件：
+        #   不存在 → 400（日志文件不存在）；存在但越界 → 403（不在允许目录内）
+        # 写死 C:\Windows\win.ini 在 Linux 上一定拿到 400（CI 曾因此失败）。
+        outside = r"C:\Windows\win.ini" if sys.platform == "win32" else "/etc/os-release"
+        if not Path(outside).exists():
+            check(True, "白名单外的日志路径被拒绝", f"跳过：{outside} 不存在")
+        else:
+            r = c.post("/api/jobs", json={"kind": "logs", "path": outside})
+            check(r.status_code == 403, "白名单外的日志路径被拒绝", str(r.status_code))
 
         # 9) 上传并分析
         sample = Path(args.sample)

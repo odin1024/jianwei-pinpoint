@@ -44,15 +44,30 @@ jobs:
       - name: 代码风格
         run: python -m ruff check src tests scripts
 
-      - name: 单元测试
-        # --timeout：任何用例挂起都在 120 秒内失败并打印栈，
-        # 而不是让 job 跑满默认 6 小时（曾发生过：ubuntu 上 pytest 静默挂起 25 分钟）
-        # -v：失败时能直接看出是哪个用例
+      # 先单独跑收集：只有这一步能区分"import/收集阶段挂起"与"某个用例挂起"。
+      # 上一轮 ubuntu 静默挂 20+ 分钟，--timeout 没触发 → 说明卡在收集阶段。
+      - name: 测试收集（快速验证导入与 conftest）
         env:
           P2S_CONSOLE_PASSWORD: test-pass
           P2S_ADMIN_PASSWORD: test-pass
           P2S_AGENT_TOKEN: test-agent-token
-        run: python -m pytest -v --timeout=120 --timeout-method=thread -p no:cacheprovider
+        timeout-minutes: 5
+        run: python -m pytest --collect-only -q -p no:cacheprovider > /dev/null || true
+
+      - name: 单元测试
+        # --timeout-method=signal：Linux 上用信号中断，能真正打断阻塞的系统调用
+        # （thread 方式只置标志位，卡在 connect() 里的用例不会被中止）
+        # --durations=20：末尾打印最慢用例，直接暴露是哪个在等超时
+        env:
+          P2S_CONSOLE_PASSWORD: test-pass
+          P2S_ADMIN_PASSWORD: test-pass
+          P2S_AGENT_TOKEN: test-agent-token
+          PYTHONUNBUFFERED: "1"
+        timeout-minutes: 15
+        run: |
+          python -m pip show pytest-timeout | head -2 || echo "pytest-timeout 未安装"
+          python -m pytest -v --timeout=60 --timeout-method=signal \
+            --durations=20 -p no:cacheprovider
 
       - name: 载荷守护
         run: python scripts/check_payload_literals.py .

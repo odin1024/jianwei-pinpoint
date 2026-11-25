@@ -33,6 +33,45 @@
 
 ---
 
+## [1.5.5] - 2026-11-25
+
+主题：**CI 第三轮：修掉验收脚本的同类平台缺陷，并让挂起可被观测**
+
+### 一、`verify_console.py` 的同一个 400/403 问题
+上一轮修了 pytest 里的 `test_log_path_outside_allowlist_rejected`，
+但 `verify_console.py` 第 8 项也写死了 `C:\Windows\win.ini`，
+在 ubuntu runner 上拿到 400 → 验收 28/29 失败。
+
+现在同样按平台选文件（POSIX 用 `/etc/os-release`），两端都应 403。
+**教训**：同一类假设会散落在多个文件里，修一处不等于修一类 —— 这次全仓搜了
+`win.ini` 才确认只有两处。
+
+### 二、`--timeout` 没生效，说明卡在收集阶段
+ubuntu 的单元测试仍静默挂 20+ 分钟，而 `--timeout=120 --timeout-method=thread`
+没有触发。pytest-timeout 只作用于**用例执行**，不覆盖 import/collect。
+
+改为可观测：
+| 改动 | 作用 |
+|---|---|
+| 单独 `pytest --collect-only`（5 分钟超时）| 区分"收集阶段卡住"与"某个用例卡住" |
+| `--timeout-method=signal` | Linux 上用信号打断阻塞的系统调用；thread 方式只置标志位，卡在 `connect()` 的用例不会中止 |
+| `--durations=20` | 末尾打印最慢用例，直接看出谁在等超时 |
+| 打印 `pip show pytest-timeout` | 确认插件真的装上了 |
+| `PYTHONUNBUFFERED=1` + 步骤级 `timeout-minutes: 15` | 输出实时可见、不再无限等待 |
+
+### 三、进度（CI 逐轮收敛）
+| 轮次 | Windows 测试 | 界面门禁 | 说明 |
+|---|---|---|---|
+| #1 | ✗ | ✗ | 首次运行，暴露问题 |
+| #2 | ✗ | ✗ | 拿到日志：Get-FileHash 缺失、空库、缺字体 |
+| #3 | ✓ | ✗ | 修 FileHash 后 Windows 通过；门禁剩 verify_console |
+| #4 | ✓ | ✗（仅 1 项）| 布局与审计已过，剩日志白名单一项 |
+
+### 回归
+`pytest 546 passed` / 验收 29/29 / ruff 全绿（本机）。
+
+---
+
 ## [1.5.4] - 2026-11-25
 
 主题：**CI 第二轮：修掉三处"只有换环境才暴露"的缺陷**
