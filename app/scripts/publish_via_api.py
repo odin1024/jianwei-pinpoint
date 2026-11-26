@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import sys
 import time
@@ -164,7 +165,15 @@ def ensure_nonempty() -> None:
     """空仓库无法创建 blob（409），先放一个占位文件激活它。"""
     refs = api("GET", "/git/refs/heads")
     if isinstance(refs, list) and refs:
-        print(f"仓库已有 {len(refs)} 个分支引用，无需激活")
+        # 关键防线：重放到非空仓库会留下"孤儿提交"（旧内容仍可按 SHA 访问）。
+        # 公开发布时这是隐患 —— 一句话没拦住，就可能把脱敏前的历史留在 GitHub 上。
+        if not os.environ.get("P2S_REPLAY_FORCE"):
+            raise SystemExit(
+                f"目标仓库已有 {len(refs)} 个分支引用 —— 拒绝在非空仓库上重放。\n"
+                f"  重放会以 force 更新 main，旧提交变成不可达但**仍可按 SHA 访问**。\n"
+                f"  公开发布前必须保证目标库是空的；需要历史时必须新建空库重放。\n"
+                f"  确认要在非空库上重放，设 P2S_REPLAY_FORCE=1。")
+        print(f"仓库已有 {len(refs)} 个分支引用；P2S_REPLAY_FORCE=1，继续")
         return
     print("仓库为空 —— 放置占位文件以激活 Git 数据接口")
     res = api("PUT", "/contents/.p2s-init", {
