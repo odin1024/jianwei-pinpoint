@@ -420,22 +420,33 @@ def _iter_recent_files(dirs: Iterable[Path], since: datetime, max_files: int = 4
                        deadline: float | None = None):
     """遍历目录里 mtime >= since 的文件。
 
-    deadline 是单调时钟的时间点（monotonic），用来给遍历本身封顶：
-    os.walk 在大目录树上本身就可能耗时很久，光靠"每处理一个文件查一次时间"
-    是来不及的 —— 一个巨型目录光 stat 就能耗掉几十秒。
+    有两个硬上界：
+      · max_files —— 产出多少个候选文件就停（防止"文件太多"）
+      · deadline  —— 单调时钟上限（防止"目录太大"）
+
+    为什么不用 os.walk：os.walk 在产出任何结果之前，会先把**整个目录**的条目
+    读进内存（os.scandir 一次列全）。GitHub runner 的 /opt 里挂着托管工具缓存，
+    单个目录几十万条目 —— 这一下就够跑几分钟，中途没有任何检查点。
+    改成手动递归 + 逐条目检查预算，才能在任意大的目录树下都有响应上界。
     """
-    for d in dirs:
+    stack: list[str] = [str(d) for d in dirs]
+    while stack:
+        if deadline is not None and time.monotonic() > deadline:
+            return
+        cur = stack.pop()
         try:
-            for root, _dirs, files in os.walk(d):
-                # 每进入一个目录就查一次预算：大目录树的 walk 才是主要开销
-                if deadline is not None and time.monotonic() > deadline:
-                    return
-                for fn in files:
+            with os.scandir(cur) as it:
+                for entry in it:
+                    # 每处理一个目录项都查预算：大目录靠这一层收敛
                     if deadline is not None and time.monotonic() > deadline:
                         return
-                    p = Path(root) / fn
                     try:
-                        st = p.stat()
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                            continue
+                        if not entry.is_file(follow_symlinks=False):
+                            continue
+                        st = entry.stat(follow_symlinks=False)
                     except OSError:
                         continue
                     if st.st_size > 8 * 1024 * 1024:
@@ -445,13 +456,12 @@ def _iter_recent_files(dirs: Iterable[Path], since: datetime, max_files: int = 4
                     except (OSError, OverflowError, ValueError):
                         continue
                     if mt >= since:
-                        yield p, mt
+                        yield Path(entry.path), mt
                         max_files -= 1
                         if max_files <= 0:
                             return
         except (PermissionError, OSError):
             continue
-
 
 def _sha256(path: Path, limit: int = 32 * 1024 * 1024) -> Optional[str]:
     try:

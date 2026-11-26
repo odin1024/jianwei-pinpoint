@@ -245,3 +245,57 @@ def test_scan_containers_stops_at_deadline(monkeypatch) -> None:
     items, notes = containers.scan_containers(deadline=time.monotonic() - 1)
     assert notes, "超时跳过后必须给出说明"
     assert any("时间预算" in n for n in notes), f"说明里没提预算：{notes}"
+
+
+def test_single_huge_directory_is_interruptible(tmp_path: Path) -> None:
+    """**单个**巨型目录也必须能在预算内被打断。
+
+    这是 CI 挂 4 轮的真正原因：runner 的 /opt 里挂着托管工具缓存，
+    单个目录就有几十万个条目。os.walk 在产出第一个结果之前会先把整目录
+    读进内存（os.scandir 一次列全），这段没有任何检查点 ——
+    20 秒预算照样跑 6 分钟以上。
+
+    改成手动递归 + 逐条目检查预算后，这个场景才有上界。
+    """
+    import os
+
+    big = tmp_path / "huge"
+    big.mkdir()
+    future = time.time() + 600
+    # 一个目录里塞满文件（不建子目录，专测"单目录过大"）
+    for i in range(6000):
+        p = big / f"n{i}.log"
+        p.write_bytes(b"D")
+        os.utime(p, (future, future))
+
+    t0 = time.monotonic()
+    got = list(hostcheck._iter_recent_files(
+        [big], hostcheck.datetime.now(), deadline=time.monotonic() + 0.3))
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 20.0, (
+        f"单个大目录下遍历耗时 {elapsed:.1f} 秒 —— "
+        f"说明预算检查点不够细（os.walk 会一次性列全目录）")
+    assert len(got) < 6000, f"没有提前停止（取了 {len(got)} 个）"
+
+
+def test_scan_artifacts_interrupts_in_huge_directory(tmp_path: Path, monkeypatch) -> None:
+    """scan_artifacts 在巨型单目录里也要按预算收工，并报告截断。"""
+    import os
+
+    monkeypatch.setattr(hostcheck, "_scan_dirs", lambda: [tmp_path])
+    big = tmp_path / "cache"
+    big.mkdir()
+    future = time.time() + 600
+    for i in range(3000):
+        p = big / f"c{i}.php"
+        p.write_bytes(b"<?php echo 1;" * 100)
+        os.utime(p, (future, future))
+
+    t0 = time.monotonic()
+    arts = hostcheck.scan_artifacts(since=hostcheck.datetime.now(), budget_seconds=1.0)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 30.0, f"scan_artifacts 在巨型目录下耗时 {elapsed:.1f} 秒"
+    kinds = {a.kind for a in arts}
+    assert "scan_truncated" in kinds, "预算耗尽必须报告截断"
