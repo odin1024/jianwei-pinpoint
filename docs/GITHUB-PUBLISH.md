@@ -1,6 +1,6 @@
 # 如何发布到 GitHub
 
-**仓库**：https://github.com/odin1024/jianwei-pinpoint （私有）
+**仓库**：https://github.com/odin1024/jianwei-pinpoint （公开）
 
 ## 一、为什么不能直接用 `git push`
 
@@ -113,6 +113,14 @@ curl.exe -s -H "Authorization: Bearer $TOKEN" `
 3. commit 身份必须用 GitHub 的 noreply 地址
    （`<用户ID>+<用户名>@users.noreply.github.com`），不要用真实邮箱：
    一旦仓库转公开，每个提交里的邮箱都会对外可见。
-4. 仓库当前是 **私有**。改公开前请复查：
-   - `docs/03-情报/` 里的情报是否有第三方版权限制
-   - `samples/` 里的日志是否含真实主机信息
+4. 仓库当前是 **公开**。公开发布前已完成脱敏（见 CHANGELOG 1.6.2）：
+   - 提交作者/提交者全部为 GitHub noreply 身份，不含真实邮箱或手机号
+   - 真实服务器公网 IP、内网网段、内网主机名、本机绝对路径已替换为占位
+   - IOC 情报里的公网 IP 按原样保留（公开威胁情报，是产品数据资产）
+
+5. 公开发布时留下的两个私有仓库可以自行删除（当前 token 缺 `delete_repo` 权限，
+   无法通过 API 删除）：
+   - `jianwei-pinpoint-archive-private`：脱敏前的历史
+   - `jianwei-pinpoint-staging`：一次中断的重放留下的孤儿提交
+
+   删除方式：仓库页 → Settings → 最下方 Danger Zone → Delete this repository。
