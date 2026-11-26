@@ -416,11 +416,23 @@ def _scan_dirs() -> list[Path]:
     return out
 
 
-def _iter_recent_files(dirs: Iterable[Path], since: datetime, max_files: int = 4000):
+def _iter_recent_files(dirs: Iterable[Path], since: datetime, max_files: int = 4000,
+                       deadline: float | None = None):
+    """遍历目录里 mtime >= since 的文件。
+
+    deadline 是单调时钟的时间点（monotonic），用来给遍历本身封顶：
+    os.walk 在大目录树上本身就可能耗时很久，光靠"每处理一个文件查一次时间"
+    是来不及的 —— 一个巨型目录光 stat 就能耗掉几十秒。
+    """
     for d in dirs:
         try:
             for root, _dirs, files in os.walk(d):
+                # 每进入一个目录就查一次预算：大目录树的 walk 才是主要开销
+                if deadline is not None and time.monotonic() > deadline:
+                    return
                 for fn in files:
+                    if deadline is not None and time.monotonic() > deadline:
+                        return
                     p = Path(root) / fn
                     try:
                         st = p.stat()
@@ -465,6 +477,8 @@ def scan_artifacts(
     """扫描入侵痕迹。
 
     since 默认取 2026-10-20（漏洞披露窗口）之后的文件；deep=True 时做内容与哈希检查。
+    budget_seconds 是总时间预算：磁盘遍历与哈希都会膨胀，必须有上界。
+    预算耗尽时产出 scan_truncated 记录（如实说明结果不完整），绝不静默截断。
     """
     lib = lib or IocLibrary()
     since = since or datetime(2026, 10, 20)
@@ -472,8 +486,8 @@ def scan_artifacts(
     deadline = time.monotonic() + budget_seconds
     truncated = False
 
-    for path, mt in _iter_recent_files(_scan_dirs(), since):
-        # 时间预算：超过就停。取证不能无限期占用，截断时如实说明。
+    for path, mt in _iter_recent_files(_scan_dirs(), since, deadline=deadline):
+        # 时间预算：超过就停。取证不能无限期占用。
         if time.monotonic() > deadline:
             truncated = True
             break
@@ -487,7 +501,7 @@ def scan_artifacts(
         #   a) 脚本/可执行后缀 —— 本来就要报出来
         #   b) 体积小的文件 —— 改名成 .txt 的恶意样本仍然能被哈希命中
         # 其余（.log/.json/大文件等）跳过哈希：它们既不是脚本，
-        # 命中 IOC 的概率也极低，算 4000 次 SHA-256 却不产出任何结论。
+        # 命中 IOC 的概率也极低，算几千次 SHA-256 却不产出任何结论。
         interesting = suffix in {".php", ".phtml", ".phar", ".sh", ".bin", ".so"}
         if not interesting:
             try:
@@ -523,6 +537,12 @@ def scan_artifacts(
                 for m in lib.match_text(content[:20000], context=str(path)):
                     found.append(SuspiciousArtifact("ioc_in_file", str(path),
                                                     f"{m.ioc_type}: {m.value}", "critical", digest))
+
+    # 生成器正常结束不代表没被截断 —— 遍历器自己也可能在预算耗尽时返回
+    # （它在 os.walk 里检查 deadline 后直接 return，不会给上层发信号）。
+    if not truncated and time.monotonic() > deadline:
+        truncated = True
+
     if truncated:
         found.append(SuspiciousArtifact(
             "scan_truncated", "",
@@ -531,7 +551,6 @@ def scan_artifacts(
             "info", None,
         ))
     return found
-
 
 def list_processes() -> list[str]:
     """列出与 PHP 相关的进程，以及可疑伪装进程。"""
@@ -579,8 +598,13 @@ def list_connections() -> list[str]:
     return lines
 
 
-def run_host_check(deep: bool = True) -> HostReport:
-    """执行完整的本地取证。"""
+def run_host_check(deep: bool = True, budget_seconds: float = 60.0) -> HostReport:
+    """执行完整的本地取证。
+
+    budget_seconds 是**总**时间预算：取证涉及磁盘遍历、哈希、进程/连接枚举，
+    每一步都可能因为目标机器规模而膨胀。必须有总上界，
+    否则在慢机器/CI runner 上这个任务会一直挂着。
+    """
     rep = HostReport(
         hostname=platform.node(),
         platform=f"{platform.system()} {platform.machine()}",
@@ -635,8 +659,11 @@ def run_host_check(deep: bool = True) -> HostReport:
     if default_exe:
         rep.settings = check_settings(default_exe)
 
+    # 痕迹扫描拿走总预算的大部分（它是磁盘密集型），
+    # 后面的进程/连接枚举各留一点余量。
     try:
-        rep.artifacts = scan_artifacts(deep=deep)
+        rep.artifacts = scan_artifacts(deep=deep,
+                                       budget_seconds=max(5.0, budget_seconds * 0.6))
     except Exception as exc:  # noqa: BLE001
         rep.errors.append(f"痕迹扫描失败: {exc}")
 

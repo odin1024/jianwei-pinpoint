@@ -126,3 +126,59 @@ def test_run_host_check_completes_quickly() -> None:
         f"run_host_check 耗时 {elapsed:.1f} 秒 —— "
         f"在慢机器/CI 上会拖垮整个测试轮次")
     assert rep is not None
+
+def test_run_host_check_respects_total_budget(tmp_path: Path, monkeypatch) -> None:
+    """整体取证必须受**总预算**约束，不是只有痕迹扫描受约束。
+
+    真实事故：GitHub runner 上 run_host_check 超过 120 秒，
+    把 test_host_job 的等待循环一起拖到超时（连挂 4 轮 CI）。
+    当时只有 scan_artifacts 有预算，而磁盘遍历本身（os.walk 大目录树）
+    就能吃掉绝大部分时间 —— 遍历器也必须看 deadline。
+    """
+    import os
+
+    # 造一个"runner 规模"的目录：多层 + 大量近期文件
+    root = tmp_path / "opt" / "a" / "b" / "c"
+    root.mkdir(parents=True)
+    future = time.time() + 600
+    for i in range(1200):
+        d = root / f"d{i % 40}"
+        d.mkdir(exist_ok=True)
+        p = d / f"f{i}.txt"
+        p.write_bytes(b"B" * 4096)
+        os.utime(p, (future, future))
+
+    monkeypatch.setattr(hostcheck, "_scan_dirs", lambda: [root])
+
+    t0 = time.monotonic()
+    hostcheck.run_host_check(budget_seconds=10.0)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 45.0, (
+        f"run_host_check 在 10 秒预算下耗时 {elapsed:.1f} 秒 —— "
+        f"总预算没有真正约束住整个流程（遍历器可能没看 deadline）")
+
+
+def test_iter_recent_files_honors_deadline(tmp_path: Path) -> None:
+    """遍历器自身必须认 deadline —— 大目录树的 os.walk 才是主要开销。"""
+    import os
+
+    root = tmp_path / "big"
+    root.mkdir()
+    future = time.time() + 600
+    for i in range(800):
+        d = root / f"x{i}"
+        d.mkdir()
+        for j in range(10):
+            p = d / f"f{j}.txt"
+            p.write_bytes(b"C" * 1024)
+            os.utime(p, (future, future))
+
+    t0 = time.monotonic()
+    got = list(hostcheck._iter_recent_files(
+        [root], hostcheck.datetime.now(), deadline=time.monotonic() + 0.5))
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 20.0, f"遍历器未认 deadline，耗时 {elapsed:.1f} 秒"
+    # 预算 0.5 秒不可能遍历完 8000 个文件，必须提前返回
+    assert len(got) < 8000, f"遍历器没有提前停止（取了 {len(got)} 个文件）"
