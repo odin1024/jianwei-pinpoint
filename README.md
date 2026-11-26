@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/odin1024/jianwei-pinpoint/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/odin1024/jianwei-pinpoint/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-1.6.3-black.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.6.4-black.svg)](CHANGELOG.md)
 
 [快速开始](#快速开始) · [核心能力](#核心能力) · [界面](#界面) · [判定口径](#判定口径) · [文档](#文档)
 

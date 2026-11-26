@@ -74,6 +74,23 @@ def test_rule_count_matches_readme() -> None:
         f"README 写 {claimed} 条规则，实际 {actual} 条")
 
 
+def test_version_badge_matches_package() -> None:
+    """README 顶部的版本徽章必须与包版本一致。
+
+    徽章是静态文本（shields.io 的 `badge/version-X-...`），不会自动更新。
+    发版时忘了改，首页就会长期挂着一个旧版本号 —— 这正是"文档说谎"最典型的形态。
+    所以把徽章也纳入门禁。
+    """
+    text = _readme()
+    m = re.search(r"badge/version-([0-9]+\.[0-9]+\.[0-9]+)-", text)
+    if not m:
+        pytest.skip("README 没有版本徽章")
+    import p2s
+
+    assert m.group(1) == p2s.__version__, (
+        f"README 版本徽章写 {m.group(1)}，实际包版本 {p2s.__version__} —— 发版时请同步徽章")
+
+
 def test_readme_does_not_hardcode_passed_count() -> None:
     """README 不应写死 passed 数：它随 Python 版本/跳过条件变化，必然漂移。
 
