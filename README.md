@@ -1,175 +1,217 @@
-# PHP2Shell 检测工具 · 见微 Pinpoint
+<div align="center">
 
-> 针对 **CVE-2026-109618**（OOM 内存破坏）/ **CVE-2026-109619**（陈旧全局状态 UAF）的
-> PHP 暴露面评估与失陷排查工具。两个漏洞 CVSS v4 **9.2**，修复基线
-> **PHP 8.5.12 / 8.4.27 / 8.3.36 / 8.2.35**，2026-10-21 官方发布，已被 CISA KEV 收录（2026-10-26）。
+<img src="docs/images/logo.svg" width="76" height="76" alt="见微 Pinpoint">
 
-本目录由原 `workbuddy/`（立项文档 + M1 原型）与 `zui/`（成品 + 交付物）合并整理而来。
-代码只有一份，文档按用途分三层，历史产物归档保留。
+# 见微 Pinpoint
 
----
+**PHP2Shell 漏洞暴露面评估与加固平台**
 
-## 一、目录结构
+查清内网哪些 PHP 实例真的会受 CVE-2026-109618 / CVE-2026-109619 影响，
+并给出可直接执行、可回滚、可复核的处置方案。
 
-```
-PHP2Shell漏洞检测工具/        ← Git 仓库根（含文档、工具与代码）
-├── app/                       ★ 唯一代码工程（可直接运行）
-│   ├── src/p2s/               引擎（core/）+ 命令行（cli.py）+ 控制台（console/）+ Agent
-│   ├── tests/                 121 个用例
-│   ├── docs/                  技术文档（架构/检测原理/平台/交付）+ 截图
-│   ├── scripts/               启停脚本 · 载荷守护 · 控制台验收脚本
-│   ├── examples/              示例日志与主机清单
-│   ├── p2s-data/              运行时数据（资产台账 assets.json + 历史报告 scans/）
-│   └── .venv/                 已装好依赖的虚拟环境（Python 3.12）
-├── docs/
-│   ├── 01-立项/               5 份立项文档（事件分析/PRD/架构/引擎方案/实施计划）+ 原型手册
-│   ├── 02-产品/               设计文档、评审报告、交付包索引、**v0.5.1 修复清单**
-│   │   └── schema与规则包/    schema.sql、php2shell-vuln-db.yaml（设计契约，非运行依赖）
-│   ├── 03-情报/               情报报告 + 2 份 GHSA 原文 + 附录 A/B
-│   │   └── 证据/              NVD 抓取、GHSA 列表、PHP NEWS、CVE 原文（事实核查用）
-│   └── assets/                Logo（SVG）与多尺寸预览
-├── samples/                   示例报告、样例日志、暴露面自查脚本
-├── dist/                      打包产物（v0.5.1 完整交付包 + 仅源码包）
-├── tools/package_release.py   重新打包脚本
-└── archive/                   M1 原型代码、媒体稿草稿（保留但不维护）
-```
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/odin1024/jianwei-pinpoint/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/odin1024/jianwei-pinpoint/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/version-1.6.3-black.svg)](CHANGELOG.md)
+
+[快速开始](#快速开始) · [核心能力](#核心能力) · [界面](#界面) · [判定口径](#判定口径) · [文档](#文档)
+
+<img src="docs/images/overview.png" alt="态势总览" width="100%">
+
+</div>
 
 ---
 
-## 二、三分钟跑起来
+## 为什么需要它
 
-```powershell
-cd app
-# 1.0.5 起没有内置默认口令：必须显式设置，否则每次重启随机生成并打印到启动日志
-$env:P2S_ADMIN_PASSWORD = "换成你的强口令"
-.\.venv\Scripts\python.exe -m p2s.cli serve --port 18080   # 浏览器开 http://127.0.0.1:18080
-```
+**PHP2Shell** 针对 PHP 会话上传机制，影响面覆盖几乎所有对外提供 PHP 服务的主机。
 
-已装好依赖，无需重新 `pip install`。常用命令：
+| 项目 | 内容 |
+|---|---|
+| 漏洞 | CVE-2026-109618（OOM 内存破坏）、CVE-2026-109619（陈旧全局状态 UAF） |
+| 严重性 | CVSS v4 **9.2**，2026-10-21 官方修复，已被 **CISA KEV** 收录（2026-10-26） |
+| 修复基线 | PHP **8.5.12 / 8.4.27 / 8.3.36 / 8.2.35** |
 
-```powershell
-.\.venv\Scripts\python.exe -m p2s.cli discover --cidr 192.168.1.0/24 --report reports\  # 设备发现
-.\.venv\Scripts\python.exe -m p2s.cli logs --file examples\access.log.sample --report reports\  # 日志分析
-.\.venv\Scripts\python.exe -m p2s.cli host --report reports\   # 本机 PHP 检查
-.\.venv\Scripts\python.exe -m p2s.cli rules                     # 查看 13 条规则
-```
+难点从来不是"知道有这个漏洞"，而是回答三个问题：
 
-> 端口被占用时 `serve` 会自动顺延，也可用 `--port` 指定。
+1. 我的环境里**哪些** PHP 实例在受影响范围内？
+2. 它的版本号看着是安全的，**实际**到底有没有编入修复？
+3. 确认受影响之后，**怎么改**、改完怎么证明改对了？
+
+见微把这三件事串成一条链路：发现 → 判定 → 取证 → 加固 → 复核。
 
 ---
 
-## 三、能力边界（重要）
+## 核心能力
+
+| 能力 | 说明 |
+|---|---|
+| **暴露面发现** | 端口 → 协议 → 存活 → 设备类型 → PHP 暴露面五层收敛；跨主机噪声端口识别，避免把 NAT / tarpit 误记成设备 |
+| **版本与修复判定** | 按 PHP 分支比对修复基线，输出三档结论：确认受影响 / 无法判定 / 确认已修复 |
+| **补丁标记与二进制证据** | 不只看版本号：读取运行时补丁标志与二进制构建信息，识别"版本号看着安全、实际没修"，以及反向的误报 |
+| **本地取证** | 只读清点安装点、生效配置、容器与 K8s 内的 PHP、入侵痕迹与进程连接，给出主机侧确认结论 |
+| **日志被动检测** | 零风险：对现有访问日志做规则匹配，发现利用尝试与扫描器行为，无需接触目标 |
+| **加固规则库** | **112 条**规则，覆盖会话、信息暴露、高危特性、资源、日志、FPM、Web 服务器、系统服务、K8s、Windows / IIS 共 11 类 |
+| **加固执行纪律** | 生成加固包 + 一次性票据 + 计划指纹，动作白名单，逐项回执，可回滚；平台不直连主机改配置 |
+| **整改跟踪与报告** | 处置状态、责任人、复扫联动；导出 Markdown / HTML / JSON / CSV，规则导出 Sigma / ModSecurity / Suricata |
+
+---
+
+## 界面
+
+**PHP 暴露面** —— 每台主机、每个实例的版本、SAPI、修复基线与判定依据，逐条可追。
+
+<img src="docs/images/php-exposure.png" alt="PHP 暴露面" width="100%">
+
+**配置加固** —— 规则带风险等级与"能否自动执行"标记，生成可交付的加固包。
+
+<img src="docs/images/hardening.png" alt="配置加固" width="100%">
+
+**规则中心** —— 检测规则与 CVE 的对应关系、所需字段与判定说明，可一键导出到现有安全设备。
+
+<img src="docs/images/rules.png" alt="规则中心" width="100%">
+
+> 以上截图使用界面演示数据，地址取自 RFC 5737 文档专用段（`203.0.113.0/24`），非真实资产。
+
+---
+
+## 快速开始
+
+### 方式一：Docker（推荐）
+
+```bash
+git clone https://github.com/odin1024/jianwei-pinpoint.git
+cd jianwei-pinpoint/app
+
+export P2S_CONSOLE_PASSWORD='换成你自己的强口令'
+docker compose up -d
+# 浏览器打开 http://127.0.0.1:18080
+```
+
+默认只发布到回环地址。需要让同事访问时，把 `docker-compose.yml` 里的端口改成
+`"18080:18080"`，并务必保留口令设置。
+
+### 方式二：源码运行
+
+```bash
+git clone https://github.com/odin1024/jianwei-pinpoint.git
+cd jianwei-pinpoint/app
+
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.lock.txt
+pip install -e . --no-deps
+
+export P2S_ADMIN_PASSWORD='换成你自己的强口令'
+python -m p2s.cli serve --port 18080
+```
+
+> 没有内置默认口令。未设置时每次启动会随机生成并打印在启动日志里。
+
+### 命令行
+
+```bash
+p2s discover --cidr 192.168.1.0/24 --report reports/   # 设备发现 + PHP 暴露面
+p2s probe    --cidr 192.168.1.0/24                     # 追加无害主动探测
+p2s logs     --file examples/access.log.sample         # 日志被动检测（零风险）
+p2s host                                               # 本机只读取证
+p2s rules    --export sigma                            # 导出规则
+p2s serve                                              # Web 控制台
+```
+
+完整参数见 `p2s <子命令> --help`，或看 [检测说明](app/docs/DETECTION.md)。
+
+---
+
+## 判定口径
+
+这套工具的价值不在于"扫出一个洞"，而在于**结论可信到什么程度**。因此每条判定都带证据来源：
+
+| 结论 | 含义 | 依据 |
+|---|---|---|
+| **确认受影响** | 可以直接据此安排处置 | 版本低于修复基线，或二进制 / 运行时标志证明未编入修复 |
+| **无法判定** | 需要补一次本地取证 | 远程只能看到线索，例如版本被隐藏、代理拦截、版本与补丁标志矛盾 |
+| **确认已修复** | 可以留档结案 | 版本已达基线，且（在有条件时）补丁标志与构建信息一致 |
+
+原则是：**远程只能提出怀疑，本地才能给出证明。**
+每一处"无法判定"都是产品主动承认的能力边界，而不是含糊过去。
+
+加固同理：**加固不等于修复**。它只降低攻击面，唯一完整的修复是把 PHP 升级到修复版本。
+
+---
+
+## 能力边界
 
 | 做 | 不做 |
 |---|---|
-| 端口/协议/存活/设备类型/PHP 暴露面五层收敛 | 不做通用漏扫 |
-| **跨主机噪声端口识别**（NAT/tarpit 环境不产生假设备） | 不发送利用载荷、不做打穿验证 |
-| **资产变更检测**（新增 / 变更 / 消失，保留变更历史） | 不修改被检系统 |
-| 13 条数据驱动日志规则 + 行为关联 | 无定时调度（变更检测已具备，自动排期未做） |
-| 主机侧只读检测（安装点/生效配置/痕迹/进程/连接） | 控制台已加登录口令，默认只监听回环地址 |
-| 报告导出 JSON / Markdown / HTML / CSV | |
+| 暴露面五层收敛、版本与补丁判定、本地取证 | 不做通用漏洞扫描器 |
+| 只读检测；加固只生成包，由你在目标机执行 | 不发送利用载荷、不做打穿验证 |
+| 日志被动检测与行为关联 | 不修改被检系统、不上传任何数据 |
+| 报告与规则导出到现有安全设备 | 不提供托管服务、无遥测与回连 |
 
-**授权**：对非自有资产执行主动探测必须事先取得书面授权。控制台默认仅监听 `127.0.0.1`。
+检测准确率有独立的基准集与可复现步骤，同时明确写出"这个基准不能证明什么"——
+见 [基准集说明](docs/BENCHMARK.md)。
 
 ---
 
+## 支持范围
 
-## 项目结构
-
-```
-PHP2Shell漏洞检测工具/        ← Git 仓库根（含文档、工具与代码）
-├── app/                    代码与发行包（CI 在 app/.github/）
-│   ├── src/p2s/
-│   │   ├── core/           引擎：探测/识别/取证/日志/规则/报告
-│   │   │   ├── discovery.py     端口→协议→存活→指纹→PHP 暴露面
-│   │   │   ├── identification.py 证据分级 T1/T2/T3 与签名匹配
-│   │   │   ├── signatures.py     设备/应用签名库（163 条）
-│   │   │   ├── binforensics.py   M5 二进制取证（PE 时间戳 / ELF build-id）
-│   │   │   ├── containers.py     Docker / K8s 容器内 PHP 清点
-│   │   │   ├── hostcheck.py      主机侧只读取证
-│   │   │   └── report.py         报告渲染（MD / HTML / JSON）
-│   │   ├── console/        控制台：app / deps / 4 个路由模块 / ui + ui_pages
-│   │   └── agent/          采集端
-│   ├── scripts/            验收、载荷守护、依赖审计、报告重渲染
-│   ├── tests/              201 项测试（含契约/版本/取证）
-│   └── docs/               截图与交付说明
-├── docs/                   立项 / 产品 / 情报 / 部署 文档
-├── samples/                样例日志与报告
-├── archive/                历史原型（不参与构建）
-├── tools/                  打包脚本
-├── CHANGELOG.md            版本记录（发布前必须更新）
-└── CONTRIBUTING.md         开发规范（每条都对应一次真实事故）
-```
-
-## 四、当前状态（2026-11-25 实测）
-
-| 项 | 值 |
+| 维度 | 范围 |
 |---|---|
-| 版本 | **1.1.3**（单一来源：`app/src/p2s/__init__.py`）|
-| 单元测试 | **537 passed**（46 个用例文件）|
-| 加固规则库 | **112 条**（11 类：会话/信息暴露/高危特性/资源/日志/FPM/Web 服务器/系统服务/K8s/Windows-IIS/Windows 权限）|
-| 覆盖 CVE | CVE-2026-109618、CVE-2026-109619 |
-| 修复基线 | 8.5→8.5.12 · 8.4→8.4.27 · 8.3→8.3.36 · 8.2→8.2.35 |
-| 加固层次 | PHP ini / PHP-FPM / Web 服务器 / systemd / Kubernetes |
+| PHP 分支 | 8.2 · 8.3 · 8.4 · 8.5（含各发行版向后移植版本） |
+| SAPI | `fpm-fcgi` · `apache2handler` · `cli-server` · `cli` |
+| 运行形态 | 裸机 / 虚拟机 / Docker / Kubernetes |
+| 检测端系统 | Linux · Windows（含 IIS / Windows 权限加固规则） |
 
-**门禁**（改完必跑，见 [`CONTRIBUTING.md`](./CONTRIBUTING.md)）：
-
-```powershell
-cd app
-$env:P2S_ADMIN_PASSWORD = "你的口令"      # 1.0.5 起无内置默认口令
-.\.venv\Scripts\python.exe -m pytest -q          # 537 passed
-.\.venv\Scripts\python.exe -m ruff check src tests scripts
-.\.venv\Scripts\python.exe scripts\verify_console.py      # 29 项
-.\.venv\Scripts\python.exe scripts\check_page_js.py       # 内联 JS 语法
-.\.venv\Scripts\python.exe scripts\check_page_html.py     # 标签配平
-.\.venv\Scripts\python.exe scripts\check_api_consistency.py  # 前后端接口一致
-```
-
-**历史实测记录**（2026-10-30）：`192.168.1.0/24` 全子网 254 台探测 → 17 台在线，
-设备识别捷普 10 / 华为 3 / FileZilla 2 / 小米 1 / 未识别 2，无跨厂商误判。
-该网段现已不可达，相关资产已于 1.1.3 清理，仅保留真实主机。
-
-**文档地图**：本项目文档分两处，分工与权威性见 **[`docs/README.md`](./docs/README.md)**。
-- `docs/` — 立项 / 产品 / 情报 / 部署（决策与背景）
-- `app/docs/` — 架构 / 检测原理 / 平台适配 / 客户部署（**技术描述以此为准**，随代码走）
-- [`CHANGELOG.md`](./CHANGELOG.md) — **变更记录的唯一权威来源**
+细节见 [平台适配](app/docs/PLATFORMS.md)、[架构说明](app/docs/ARCHITECTURE.md)。
 
 ---
 
-## 五、许可与使用授权
+## 文档
 
-### 开源协议
+| 文档 | 内容 |
+|---|---|
+| [部署说明（客户环境）](app/docs/DEPLOY-CUSTOMER.md) | 反向代理、TLS、口令、数据目录、离线安装 |
+| [检测原理](app/docs/DETECTION.md) | 五层判定流程、证据分级、结论口径 |
+| [架构说明](app/docs/ARCHITECTURE.md) | 模块划分与数据流 |
+| [平台适配](app/docs/PLATFORMS.md) | 各发行版与 SAPI 的差异处理 |
+| [基准集](docs/BENCHMARK.md) | 准确率复现步骤与判断标准 |
+| [变更记录](CHANGELOG.md) | 版本演进的唯一权威来源 |
+| [参与贡献](CONTRIBUTING.md) | 开发规范与门禁清单 |
 
-本项目采用 **Apache License 2.0**（见 [`LICENSE`](./LICENSE)），附带 [`NOTICE`](./NOTICE) 说明
-第三方依赖与情报素材的来源与版权。
+---
 
-- ✅ 可商用、可修改、可闭源分发
-- ✅ 含**专利授权**（第 3 条），企业客户合规审查更容易通过
-- ⚠️ 修改后的文件需保留变更说明；须随分发附上本许可
-- ⚠️ 许可**不授予**使用本项目商标与商品名的权利（第 6 条）
+## 授权与免责
 
-### 使用授权（请务必阅读）
-
-这是一个**主动探测**工具。对非自有资产执行扫描，
-在很多司法辖区属于违法行为，并可能触发对方的安全响应。
+这是一个**主动探测**工具。对非自有资产执行扫描，在很多司法辖区属于违法行为，
+并可能触发对方的安全响应。
 
 **使用前请确认：**
 
 1. 目标资产属于你本人，或你已取得**书面授权**（含探测范围与时窗）；
 2. 已告知目标系统的运维方，避免被误判为攻击而中断业务；
-3. 扫描频率与并发控制在业务可承受范围内（本项目默认保守，勿随意调高）。
+3. 扫描频率与并发控制在业务可承受范围内（本项目默认保守，请勿随意调高）。
 
 **平台的设计约束（按此实现，不是口头承诺）：**
 
 | 约束 | 实现方式 |
 |---|---|
 | 不主动外联 | 只连接你填写的目标，无遥测、无回连 |
-| 控制台默认仅监听回环 | `serve` 默认 `127.0.0.1`，对外暴露需显式 `--host 0.0.0.0` |
-| 加固不直连主机 | 生成"包"由你在目标机执行，平台不远程改配置 |
-| 加固不等于修复 | 只降低攻击面；唯一完整修复是升级 PHP 到修复版本 |
+| 控制台默认仅监听回环 | `serve` 默认 `127.0.0.1`，对外暴露需显式指定 |
+| 加固不直连主机 | 生成加固包由你在目标机执行，平台不远程改配置 |
+| 加固不等于修复 | 只降低攻击面；完整修复是升级 PHP |
 
-### 免责声明
+本软件按"现状"提供，不附带任何明示或暗示的担保。因使用本软件造成的任何直接或间接损失
+（含业务中断、数据损坏、法律纠纷），作者与贡献者不承担责任。
+**使用即表示你已理解并接受上述约束。**
 
-本软件按"现状"提供，不附带任何明示或暗示的担保。
-因使用本软件造成的任何直接或间接损失（含业务中断、数据损坏、
-法律纠纷），作者与贡献者不承担责任。**使用即表示你已理解并接受上述约束。**
+---
+
+## 许可
+
+[Apache License 2.0](LICENSE)，附带 [NOTICE](NOTICE) 说明第三方依赖与情报素材的来源与版权。
+
+- ✅ 可商用、可修改、可闭源分发
+- ✅ 含专利授权（第 3 条）
+- ⚠️ 修改后的文件需保留变更说明；分发时须附上本许可
+- ⚠️ 许可不授予使用本项目商标与商品名的权利（第 6 条）

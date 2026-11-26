@@ -57,9 +57,13 @@ def test_version_consistent() -> None:
 
 
 def test_rule_count_matches_readme() -> None:
-    """README 若声明规则条数，必须与 rulebook 实际一致。"""
+    """README 若声明规则条数，必须与 rulebook 实际一致。
+
+    首列允许加粗（`| **加固规则库** |`）—— 曾经因为不接受加粗，
+    这个门禁静默跳过了，等于没检查。
+    """
     text = _readme()
-    m = re.search(r"加固规则库 \| \*\*(\d+) 条\*\*", text)
+    m = re.search(r"\*{0,2}加固规则库\*{0,2}\s*\|\s*\*\*(\d+) 条\*\*", text)
     if not m:
         pytest.skip("README 未声明规则条数")
     claimed = int(m.group(1))
