@@ -110,8 +110,9 @@ curl.exe -s -H "Authorization: Bearer $TOKEN" `
 1. **不要把 token 写进任何文件**；本文档所有命令都用 `$TOKEN` 变量占位
 2. 本次发布用的 OAuth token 是从凭据管理器读的（40 字符，作用域 `gist, repo, workflow`），
    未复制到他处
-3. commit 邮箱是 `<你的 GitHub noreply 邮箱>`（含手机号）。**若要改公开仓库**，
-   请先改成 `odin1024@users.noreply.github.com`，否则手机号会出现在每个 commit 里
+3. commit 身份必须用 GitHub 的 noreply 地址
+   （`<用户ID>+<用户名>@users.noreply.github.com`），不要用真实邮箱：
+   一旦仓库转公开，每个提交里的邮箱都会对外可见。
 4. 仓库当前是 **私有**。改公开前请复查：
    - `docs/03-情报/` 里的情报是否有第三方版权限制
    - `samples/` 里的日志是否含真实主机信息
