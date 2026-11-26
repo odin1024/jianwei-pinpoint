@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -94,11 +95,11 @@ def list_containers() -> list[dict]:
     return rows
 
 
-def _probe_inside(name: str) -> tuple[Optional[str], Optional[str], Optional[bool]]:
+def _probe_inside(name: str, timeout: float = 10.0) -> tuple[Optional[str], Optional[str], Optional[bool]]:
     """容器内核实：版本 / SAPI / 补丁标志。返回 (version, sapi, patch_flag)。"""
     rc, out = _run(["docker", "exec", name, "php", "-r",
                     'echo PHP_VERSION, "|", PHP_SAPI, "|",'
-                    'var_export(ini_get("memory_hard_limit_percent"), true);'], timeout=10)
+                    'var_export(ini_get("memory_hard_limit_percent"), true);'], timeout=timeout)
     if rc != 0 or "|" not in out:
         return None, None, None
     parts = out.strip().split("|")
@@ -113,8 +114,12 @@ def _probe_inside(name: str) -> tuple[Optional[str], Optional[str], Optional[boo
     return ver, sapi, flag
 
 
-def scan_containers() -> tuple[list[ContainerInstall], list[str]]:
-    """清点容器里的 PHP。返回 (安装点, 说明/错误)。"""
+def scan_containers(deadline: float | None = None) -> tuple[list[ContainerInstall], list[str]]:
+    """清点容器里的 PHP。返回 (安装点, 说明/错误)。
+
+    deadline 是单调时钟的上限时刻。docker exec 是逐个容器串行执行的，
+    容器多的时候线性累加，必须有上界，否则取证任务会一直挂着。
+    """
     if not docker_available():
         return [], ["未检测到 docker CLI，跳过容器清点（容器内 PHP 对本次检测不可见）"]
     rows = list_containers()
@@ -123,7 +128,13 @@ def scan_containers() -> tuple[list[ContainerInstall], list[str]]:
 
     out: list[ContainerInstall] = []
     exec_allowed = os.environ.get("P2S_CONTAINER_EXEC") == "1"
-    for c in rows:
+    timeout_notes: list[str] = []
+    for idx, c in enumerate(rows):
+        if deadline is not None and time.monotonic() > deadline:
+            timeout_notes.append(
+                f"容器清点已达时间预算：共 {len(rows)} 个容器，"
+                f"已检查 {idx} 个，剩余 {len(rows) - idx} 个未检查")
+            break
         ver, sapi = parse_php_from_image(c["image"])
         if ver is None and not sapi:
             continue                      # 与 PHP 无关的容器直接跳过
@@ -132,7 +143,10 @@ def scan_containers() -> tuple[list[ContainerInstall], list[str]]:
         patch_flag = None
         # 开启 exec 时以容器内实际值为准：版本可信 + 取补丁标志
         if exec_allowed:
-            _ver, _sapi, _flag = _probe_inside(c["name"])
+            _t = 10.0
+            if deadline is not None:
+                _t = max(1.0, min(10.0, deadline - time.monotonic()))
+            _ver, _sapi, _flag = _probe_inside(c["name"], timeout=_t)
             if _ver:
                 ver = _ver
                 sapi = _sapi or sapi
@@ -147,8 +161,8 @@ def scan_containers() -> tuple[list[ContainerInstall], list[str]]:
                                     version=ver, sapi=sapi, note=note,
                                     patch_flag=patch_flag, verified=verified))
     if not out:
-        return [], [f"清点 {len(rows)} 个容器，未发现 PHP 运行时"]
-    return out, []
+        return [], [f"清点 {len(rows)} 个容器，未发现 PHP 运行时", *timeout_notes]
+    return out, timeout_notes
 
 
 # --------------------------------------------------------------------------
@@ -181,7 +195,9 @@ def list_pods() -> list[dict]:
     return rows
 
 
-def scan_kubernetes() -> tuple[list[ContainerInstall], list[str]]:
+def scan_kubernetes(deadline: float | None = None) -> tuple[list[ContainerInstall], list[str]]:
+    if deadline is not None and time.monotonic() > deadline:
+        return [], ["Kubernetes 清点已跳过：取证已达时间预算"]
     if not kubectl_available():
         return [], ["未检测到 kubectl，跳过 Kubernetes 清点"]
     rows = list_pods()

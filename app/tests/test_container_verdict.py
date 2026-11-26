@@ -38,7 +38,9 @@ def test_scan_containers_uses_exec_when_enabled(monkeypatch):
     monkeypatch.setattr(C, "docker_available", lambda: True)
     monkeypatch.setattr(C, "list_containers",
                         lambda: [{"id": "a", "name": "web", "image": "php:8.4.26-cli"}])
-    monkeypatch.setattr(C, "_probe_inside", lambda name: ("8.4.26", "cli", False))
+    # 桩必须接受 timeout：真实实现会按剩余预算收敛单次 exec 的超时
+    monkeypatch.setattr(C, "_probe_inside",
+                        lambda name, timeout=10: ("8.4.26", "cli", False))
     items, notes = C.scan_containers()
     assert len(items) == 1
     assert items[0].verified is True

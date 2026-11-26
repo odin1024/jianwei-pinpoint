@@ -611,17 +611,36 @@ def run_host_check(deep: bool = True, budget_seconds: float = 60.0) -> HostRepor
         platform_release=platform.release(),
         checked_at=datetime.now().isoformat(timespec="seconds"),
     )
+    deadline = time.monotonic() + budget_seconds
+
+    def _left() -> float:
+        """剩余预算（秒）。为负表示已经超时。"""
+        return deadline - time.monotonic()
+
+    def _skip(stage: str) -> None:
+        rep.errors.append(
+            f"{stage} 已跳过：本次取证已达 {budget_seconds:.0f} 秒总预算"
+            f"（该步骤结果不完整）")
+
     installs, errors = enumerate_php_installs()
 
     # 容器 / K8s 里的 PHP 在宿主机上不可见，单独清点后并入安装点列表。
     # 任何异常都不能让主机检测整体失败 —— 宁可少报一类，也不能整份报告挂掉。
+    #
+    # 注意：这一段会调 docker / kubectl。runner 上装了 docker CLI 但 daemon 常没起，
+    # docker 客户端会反复重连，单个命令就能耗掉好几秒。所以每一步之前都要看总预算。
     for _scanner, _label in (("scan_containers", "容器"), ("scan_kubernetes", "Kubernetes")):
+        if _left() <= 0:
+            _skip(f"{_label}清点")
+            continue
         try:
             from . import containers as _c
             _fn = getattr(_c, _scanner, None)
             if _fn is None:
                 continue
-            _items, _notes = _fn()
+            # 把总截止时刻传下去：docker exec / kubectl 都是串行外部命令，
+            # 容器多的时候会线性累加，必须让它们自己收敛。
+            _items, _notes = _fn(deadline=deadline)
             errors.extend(_notes)
             for _it in _items:
                 _d = _it.to_dict()
@@ -659,22 +678,31 @@ def run_host_check(deep: bool = True, budget_seconds: float = 60.0) -> HostRepor
     if default_exe:
         rep.settings = check_settings(default_exe)
 
-    # 痕迹扫描拿走总预算的大部分（它是磁盘密集型），
-    # 后面的进程/连接枚举各留一点余量。
-    try:
-        rep.artifacts = scan_artifacts(deep=deep,
-                                       budget_seconds=max(5.0, budget_seconds * 0.6))
-    except Exception as exc:  # noqa: BLE001
-        rep.errors.append(f"痕迹扫描失败: {exc}")
+    # 痕迹扫描是磁盘密集型的，拿剩余预算的绝大部分，
+    # 但要给后面的进程/连接枚举留至少 5 秒余量。
+    if _left() > 1.0:
+        per_scan = max(2.0, _left() - 5.0)
+        try:
+            rep.artifacts = scan_artifacts(deep=deep, budget_seconds=per_scan)
+        except Exception as exc:  # noqa: BLE001
+            rep.errors.append(f"痕迹扫描失败: {exc}")
+    else:
+        _skip("痕迹扫描")
 
-    try:
-        rep.processes = list_processes()
-    except Exception as exc:  # noqa: BLE001
-        rep.errors.append(f"进程枚举失败: {exc}")
+    if _left() > 0:
+        try:
+            rep.processes = list_processes()
+        except Exception as exc:  # noqa: BLE001
+            rep.errors.append(f"进程枚举失败: {exc}")
+    else:
+        _skip("进程枚举")
 
-    try:
-        rep.connections = list_connections()
-    except Exception as exc:  # noqa: BLE001
-        rep.errors.append(f"连接枚举失败: {exc}")
+    if _left() > 0:
+        try:
+            rep.connections = list_connections()
+        except Exception as exc:  # noqa: BLE001
+            rep.errors.append(f"连接枚举失败: {exc}")
+    else:
+        _skip("连接枚举")
 
     return rep

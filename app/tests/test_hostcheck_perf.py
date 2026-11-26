@@ -182,3 +182,66 @@ def test_iter_recent_files_honors_deadline(tmp_path: Path) -> None:
     assert elapsed < 20.0, f"遍历器未认 deadline，耗时 {elapsed:.1f} 秒"
     # 预算 0.5 秒不可能遍历完 8000 个文件，必须提前返回
     assert len(got) < 8000, f"遍历器没有提前停止（取了 {len(got)} 个文件）"
+
+
+def test_run_host_check_survives_hanging_docker(tmp_path: Path, monkeypatch) -> None:
+    """docker/kubectl 卡住时，取证仍必须在总预算内收工。
+
+    真实事故（CI 第 7 轮）：GitHub runner 上装了 docker CLI 但 daemon 没起，
+    docker 客户端会反复重连，单个命令就能耗掉十几秒；容器多时线性累加。
+    `run_host_check` 的预算当时只覆盖磁盘扫描，没覆盖这段外部命令，
+    于是整体耗时 >120 秒，两个用例被 pytest-timeout 判死。
+    """
+    import shutil as _shutil
+    import subprocess
+
+    monkeypatch.setattr(hostcheck, "_scan_dirs", lambda: [tmp_path])
+
+    # 模拟"docker 命令会挂住"：任何 docker/kubectl 调用都睡满整个 timeout
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        if isinstance(cmd, (list, tuple)) and cmd and str(cmd[0]) in {"docker", "kubectl"}:
+            tmo = float(kwargs.get("timeout") or 5.0)
+            time.sleep(tmo)
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=tmo)
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    # 让容器扫描认为 docker 可用，从而真的走到外部命令
+    monkeypatch.setattr(
+        _shutil, "which",
+        lambda name: "/usr/bin/docker" if name in {"docker", "kubectl"} else None)
+
+    t0 = time.monotonic()
+    rep = hostcheck.run_host_check(budget_seconds=8.0)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 45.0, (
+        f"docker 卡住时取证耗时 {elapsed:.1f} 秒（预算 8 秒）—— "
+        f"说明容器清点没拿到 deadline 或没按剩余预算收敛")
+    assert rep is not None
+
+
+def test_scan_containers_accepts_deadline() -> None:
+    """容器清点必须能接收截止时刻（否则无法被总预算约束）。"""
+    import inspect
+
+    from p2s.core import containers
+
+    assert "deadline" in inspect.signature(containers.scan_containers).parameters, (
+        "scan_containers 缺少 deadline 参数")
+    assert "deadline" in inspect.signature(containers.scan_kubernetes).parameters, (
+        "scan_kubernetes 缺少 deadline 参数")
+
+
+def test_scan_containers_stops_at_deadline(monkeypatch) -> None:
+    """已超过截止时刻时，容器清点必须立刻返回并说明跳过原因。"""
+    from p2s.core import containers
+
+    monkeypatch.setattr(containers, "docker_available", lambda: True)
+    monkeypatch.setattr(containers, "list_containers",
+                        lambda: [{"id": "a", "image": "php:8.2-fpm", "name": "c1"}])
+    items, notes = containers.scan_containers(deadline=time.monotonic() - 1)
+    assert notes, "超时跳过后必须给出说明"
+    assert any("时间预算" in n for n in notes), f"说明里没提预算：{notes}"
