@@ -296,6 +296,17 @@ def test_scan_artifacts_interrupts_in_huge_directory(tmp_path: Path, monkeypatch
     arts = hostcheck.scan_artifacts(since=hostcheck.datetime.now(), budget_seconds=1.0)
     elapsed = time.monotonic() - t0
 
+    # 这里断言的是"有界"，**不是**"一定截断"：
+    # 快机器上 3000 个文件不到 1 秒就扫完了，此时不截断才是正确行为。
+    # 之前写成"必须截断"，在 GitHub runner 上就误报了（0.52 秒扫完，不该有截断）。
     assert elapsed < 30.0, f"scan_artifacts 在巨型目录下耗时 {elapsed:.1f} 秒"
     kinds = {a.kind for a in arts}
-    assert "scan_truncated" in kinds, "预算耗尽必须报告截断"
+    truncated = "scan_truncated" in kinds
+    if truncated:
+        # 一旦报截断，就必须给出可见的说明（不能是空记录）
+        note = next(a for a in arts if a.kind == "scan_truncated")
+        assert "预算" in note.detail, f"截断记录缺少说明：{note.detail}"
+    else:
+        # 没截断就说明真的扫完了 —— 至少要扫到那些 .php 文件
+        assert any(a.kind == "recent_script" for a in arts), (
+            f"既没截断也没扫到文件，说明遍历逻辑坏了：kinds={kinds}")

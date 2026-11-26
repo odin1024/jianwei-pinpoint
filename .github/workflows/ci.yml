@@ -56,43 +56,6 @@ jobs:
         # 那个重定向语法在 PowerShell 里是语法错误（曾导致该步骤直接失败）。
         run: python -m pytest --collect-only -q -p no:cacheprovider
 
-      # 取证各阶段的真实耗时——只在 Linux runner 上跑，直接暴露是哪个阶段挂住。
-      # 前两轮修了哈希与遍历，仍然 >120 秒，说明还有没被覆盖的耗时路径。
-      - name: 取证阶段计时（诊断用）
-        if: runner.os == 'Linux'
-        timeout-minutes: 6
-        env:
-          P2S_CONSOLE_PASSWORD: test-pass
-          P2S_ADMIN_PASSWORD: test-pass
-        run: |
-          python - <<'PY'
-          import subprocess, sys, time
-          sys.path.insert(0, "src")
-          from p2s.core import hostcheck
-          import shutil
-          print("docker:", shutil.which("docker"), "| kubectl:", shutil.which("kubectl"))
-          steps = [
-              ("enumerate_php_installs", hostcheck.enumerate_php_installs),
-              ("scan_containers", lambda: __import__("p2s.core.containers", fromlist=["x"]).scan_containers()),
-              ("scan_kubernetes", lambda: __import__("p2s.core.containers", fromlist=["x"]).scan_kubernetes()),
-              ("scan_artifacts", lambda: hostcheck.scan_artifacts(budget_seconds=20)),
-              ("list_processes", hostcheck.list_processes),
-              ("list_connections", hostcheck.list_connections),
-          ]
-          for name, fn in steps:
-              t = time.monotonic()
-              try:
-                  r = fn()
-                  n = len(r) if isinstance(r, tuple) else len(r)
-                  print(f"{name:24s} {time.monotonic()-t:7.2f}s n={n}", flush=True)
-              except Exception as exc:
-                  print(f"{name:24s} {time.monotonic()-t:7.2f}s ERR {type(exc).__name__}", flush=True)
-          for budget in (8.0, 60.0):
-              t = time.monotonic()
-              hostcheck.run_host_check(budget_seconds=budget)
-              print(f"run_host_check(budget={budget:4.0f}s) {time.monotonic()-t:7.2f}s", flush=True)
-          PY
-
       - name: 单元测试
         # --timeout-method=signal：Linux 上用信号中断，能真正打断阻塞的系统调用
         # （thread 方式只置标志位，卡在 connect() 里的用例不会被中止）
