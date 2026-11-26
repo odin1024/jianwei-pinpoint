@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -379,6 +380,10 @@ def check_settings(exe: str) -> list[SettingCheck]:
 # --------------------------------------------------------------------------
 
 #: 值得扫描的目录（可能包含攻击者落地文件）
+#: 扫描目录数上限：目录越多耗时越长，必须有明确上界
+_MAX_SCAN_DIRS = 24
+
+
 def _scan_dirs() -> list[Path]:
     dirs: list[Path] = []
     tmp = [os.environ.get("TMPDIR"), os.environ.get("TMP"), os.environ.get("TEMP"), "/tmp", "/var/tmp"]
@@ -398,13 +403,16 @@ def _scan_dirs() -> list[Path]:
         for d in ("/private/tmp", "/private/var/tmp", "/usr/local/var/www"):
             if Path(d).is_dir():
                 dirs.append(Path(d))
-    # 去重
+    # 去重 + 数量上限
     out, seen = [], set()
     for d in dirs:
         k = str(d)
-        if k not in seen:
-            seen.add(k)
-            out.append(d)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(d)
+        if len(out) >= _MAX_SCAN_DIRS:
+            break
     return out
 
 
@@ -446,8 +454,13 @@ def _sha256(path: Path, limit: int = 32 * 1024 * 1024) -> Optional[str]:
         return None
 
 
+#: 非脚本类文件也要参与哈希匹配时的体积上限（改名的小样本仍能命中）
+_HASH_PROBE_MAX_BYTES = 1024 * 1024
+
+
 def scan_artifacts(
-    since: datetime | None = None, *, deep: bool = True, lib: IocLibrary | None = None
+    since: datetime | None = None, *, deep: bool = True, lib: IocLibrary | None = None,
+    budget_seconds: float = 20.0,
 ) -> list[SuspiciousArtifact]:
     """扫描入侵痕迹。
 
@@ -456,11 +469,32 @@ def scan_artifacts(
     lib = lib or IocLibrary()
     since = since or datetime(2026, 10, 20)
     found: list[SuspiciousArtifact] = []
+    deadline = time.monotonic() + budget_seconds
+    truncated = False
 
     for path, mt in _iter_recent_files(_scan_dirs(), since):
+        # 时间预算：超过就停。取证不能无限期占用，截断时如实说明。
+        if time.monotonic() > deadline:
+            truncated = True
+            break
         try:
             suffix = path.suffix.lower()
         except OSError:
+            continue
+
+        # --- 先分流，别急着算哈希 ---
+        # 只有两类文件值得付出 SHA-256 的代价：
+        #   a) 脚本/可执行后缀 —— 本来就要报出来
+        #   b) 体积小的文件 —— 改名成 .txt 的恶意样本仍然能被哈希命中
+        # 其余（.log/.json/大文件等）跳过哈希：它们既不是脚本，
+        # 命中 IOC 的概率也极低，算 4000 次 SHA-256 却不产出任何结论。
+        interesting = suffix in {".php", ".phtml", ".phar", ".sh", ".bin", ".so"}
+        if not interesting:
+            try:
+                interesting = path.stat().st_size <= _HASH_PROBE_MAX_BYTES
+            except OSError:
+                continue
+        if not interesting:
             continue
 
         # 1) 已知样本哈希
@@ -489,6 +523,13 @@ def scan_artifacts(
                 for m in lib.match_text(content[:20000], context=str(path)):
                     found.append(SuspiciousArtifact("ioc_in_file", str(path),
                                                     f"{m.ioc_type}: {m.value}", "critical", digest))
+    if truncated:
+        found.append(SuspiciousArtifact(
+            "scan_truncated", "",
+            f"扫描达到 {budget_seconds:.0f} 秒时间预算，已停止遍历；"
+            f"本轮结果不完整，需提高预算后重跑",
+            "info", None,
+        ))
     return found
 
 

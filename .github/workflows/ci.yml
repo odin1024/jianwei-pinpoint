@@ -52,7 +52,9 @@ jobs:
           P2S_ADMIN_PASSWORD: test-pass
           P2S_AGENT_TOKEN: test-agent-token
         timeout-minutes: 5
-        run: python -m pytest --collect-only -q -p no:cacheprovider > /dev/null || true
+        # 不用 `> /dev/null`：Windows runner 的默认 shell 是 PowerShell，
+        # 那个重定向语法在 PowerShell 里是语法错误（曾导致该步骤直接失败）。
+        run: python -m pytest --collect-only -q -p no:cacheprovider
 
       - name: 单元测试
         # --timeout-method=signal：Linux 上用信号中断，能真正打断阻塞的系统调用
@@ -65,9 +67,8 @@ jobs:
           PYTHONUNBUFFERED: "1"
         timeout-minutes: 15
         run: |
-          python -m pip show pytest-timeout | head -2 || echo "pytest-timeout 未安装"
-          python -m pytest -v --timeout=60 --timeout-method=signal \
-            --durations=20 -p no:cacheprovider
+          python -m pip show pytest-timeout
+          python -m pytest -v --timeout=120 --durations=20 -p no:cacheprovider
 
       - name: 载荷守护
         run: python scripts/check_payload_literals.py .

@@ -36,7 +36,7 @@ def test_host_job_runs_to_completion(client) -> None:
     assert r.status_code == 200, r.text
     job_id = r.json()["id"]
 
-    deadline = time.time() + 90
+    deadline = time.time() + 60
     job = {}
     while time.time() < deadline:
         job = client.get(f"/api/jobs/{job_id}").json()
@@ -52,7 +52,7 @@ def test_host_job_produces_host_report(client) -> None:
     """跑完后结果里应有主机侧报告（安装点/配置/进程等字段）。"""
     r = client.post("/api/jobs", json={"kind": "host"})
     job_id = r.json()["id"]
-    deadline = time.time() + 90
+    deadline = time.time() + 60
     job = {}
     while time.time() < deadline:
         job = client.get(f"/api/jobs/{job_id}").json()
