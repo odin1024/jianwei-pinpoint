@@ -45,6 +45,7 @@
   <symbol id="i-net" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="9" y="15" width="6" height="6" rx="1"/><path d="M6 9v3h12V9M12 12v3"/></symbol>
   <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
   <symbol id="i-code" viewBox="0 0 24 24"><path d="m9 8-5 4 5 4M15 8l5 4-5 4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
   <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 9.5 4.3 4.3 0 0 1 17.5 18H7Z"/></symbol>
   <symbol id="i-app" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></symbol>
 </svg>
@@ -183,6 +184,26 @@ function emptyState(icon,title,hint){
 }
 function toast(msg,kind='info'){const t=document.createElement('div');t.className='toast '+kind;t.textContent=msg;
   $('#toasts').appendChild(t);setTimeout(()=>{t.style.opacity=0;t.style.transition='.3s';setTimeout(()=>t.remove(),320)},3600)}
+/* 复制到剪贴板：交付客户时要频繁摘取证据、IP、哈希。
+   优先用 Clipboard API（需 https 或 localhost）；不可用时回退到 execCommand。 */
+async function copyText(text,okMsg){
+  const s=String(text==null?'':text);
+  let done=false;
+  try{
+    if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(s);done=true}
+  }catch(e){/* 下面回退 */}
+  if(!done){
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=s;ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);ta.select();
+      done=document.execCommand('copy');
+      ta.remove();
+    }catch(e){done=false}
+  }
+  toast(done?(okMsg||'已复制到剪贴板'):'复制失败，请手动选择文本',done?'ok':'err');
+  return done;
+}
 
 const RISK={critical:['crit','严重'],high:['high','高危'],medium:['high','中危'],low:['ok','低危']};
 const EXP={exposed:['crit','暴露·需修复'],patched:['ok','已修复'],not_php:['mute','无 PHP'],unknown:['warn','待确认']};

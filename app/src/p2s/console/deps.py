@@ -29,11 +29,14 @@ from ..core.jobs import JobManager
 DATA_DIR = Path(os.environ.get("P2S_DATA_DIR", "./p2s-data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 ASSETS_FILE = DATA_DIR / "assets.json"
+ASSETS_DB = DATA_DIR / "assets.db"
 SCANS_DIR = DATA_DIR / "scans"
 UPLOAD_DIR = DATA_DIR / "uploads"
-
 _lock = threading.Lock()
 JOBS = JobManager(DATA_DIR, max_workers=1)
+
+#: 资产存储实例（延迟创建，见 _asset_store()）
+_ASSET_STORE = None
 
 # --------------------------------------------------------------------------
 # 认证
@@ -252,18 +255,30 @@ def validate_webhook_url(url: str) -> None:
             )
 
 
-def _load_assets() -> list[dict]:
-    if not ASSETS_FILE.exists():
-        return []
-    for attempt in range(2):
+def _asset_store():
+    """返回进程级唯一的资产存储实例（首次调用时创建）。"""
+    global _ASSET_STORE
+    if _ASSET_STORE is None:
+        from .asset_store import AssetStore
+
+        _ASSET_STORE = AssetStore(ASSETS_DB, ASSETS_FILE, redact=_redact_asset_text)
+        # 首次启动：若检测到旧的 assets.json 且数据库为空，自动导入。
+        # 原文件保留不删 —— 数据迁移必须可回退。
         try:
-            return json.loads(ASSETS_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            if attempt == 0:
-                time.sleep(0.05)   # 可能正撞上一次 replace，重试一次
-                continue
-            return []
-    return []
+            _ASSET_STORE._migrate_from_json()
+        except Exception:          # noqa: BLE001 —— 迁移失败不该阻断启动
+            pass
+    return _ASSET_STORE
+
+
+def _load_assets() -> list[dict]:
+    """读出全部资产。
+
+    走 SQLite 存储（见 ``console/asset_store.py``）。首次启动时若检测到旧的
+    ``assets.json`` 会自动导入 —— 原文件保留不删，出问题可人工回退。
+    SQLite 不可用时自动回退 JSON 读取，平台不因存储故障整体不可用。
+    """
+    return _asset_store().load()
 
 
 #: 资产里属于「自由文本」的字段：可能承载攻击载荷或敏感回显，落盘前脱敏。
@@ -299,8 +314,32 @@ def _redact_asset_text(obj):
 
 
 def _save_assets(assets: list[dict]) -> None:
-    safe = [_redact_asset_text(a) for a in assets]
-    _atomic_write(ASSETS_FILE, json.dumps(safe, ensure_ascii=False, indent=2))
+    """写入全部资产。落盘前统一脱敏。"""
+    _asset_store().save(assets)
+
+
+def _upsert_asset(asset: dict) -> None:
+    """写入/覆盖单条资产 —— 增量写。
+
+    比 `_save_assets` 快得多：代价与台账规模无关。
+    单条增删改的接口应当优先用这个。
+    """
+    _asset_store().upsert(asset)
+
+
+def _delete_asset(host: str) -> bool:
+    """删除单条资产。返回是否确实删掉了。"""
+    return _asset_store().delete(host)
+
+
+def _get_asset(host: str) -> dict | None:
+    """按 host 取单条资产 —— O(1)，不扫全表。"""
+    return _asset_store().get(host)
+
+
+def _count_assets() -> int:
+    """资产条数 —— 比 load() 再 len() 便宜得多。"""
+    return _asset_store().count()
 
 
 def _resolve_log_path(raw: str) -> Path:
@@ -546,6 +585,7 @@ __all__ = [
     "ADMIN_USER",
     "AGENT_TOKEN",
     "ASSETS_FILE",
+    "ASSETS_DB",
     "CONSOLE_PASSWORD",
     "DATA_DIR",
     "JOBS",
@@ -580,6 +620,10 @@ __all__ = [
     "_persist",
     "_resolve_log_path",
     "_save_assets",
+    "_upsert_asset",
+    "_delete_asset",
+    "_get_asset",
+    "_count_assets",
     "_scan_signature",
     "_scan_summary",
     "_session_valid",

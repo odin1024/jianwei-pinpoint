@@ -41,8 +41,12 @@ async function openAsset(host){
         <td style="font-size:11.5px">${esc(s.http_title||s.tls_subject||s.banner||'-')}</td></tr>`).join('')}</tbody></table></div></div>`:''}
     ${(x.candidates||[]).length?`<div class="sect"><div class="sect-t">其他候选</div>
       <div class="row">${(x.candidates||[]).map(c=>tag('mute',c.label+' ('+c.score+')')).join('')}</div></div>`:''}
-    <div class="sect"><div class="sect-t">判定证据（${(x.evidence||[]).length}）</div>
-      ${(x.evidence||[]).map(e=>`<div class="evi">${esc(e)}</div>`).join('')||'<div class="muted" style="font-size:12px">无</div>'}</div>
+    <div class="sect"><div class="sect-t">判定证据（${(x.evidence||[]).length}）
+        ${(x.evidence||[]).length?`<button class="btn sm ghost" style="float:right;margin-top:-4px"
+          onclick="copyText(${(x.evidence||[]).map(e=>jss(e)).join(',')},'已复制全部证据')">${ico('copy','s12')}复制全部</button>`:''}
+      </div>
+      ${(x.evidence||[]).map(e=>`<div class="evi" title="点击复制这一条" style="cursor:pointer"
+        onclick="copyText(${jss(e)},'已复制')">${esc(e)}</div>`).join('')||'<div class="muted" style="font-size:12px">无</div>'}</div>
     ${(x.errors||[]).length?`<div class="sect"><div class="sect-t">错误</div>
       ${(x.errors||[]).map(e=>`<div class="evi" style="border-left-color:var(--danger-border)">${esc(e)}</div>`).join('')}</div>`:''}`;
   $('#drawer-foot').innerHTML=`

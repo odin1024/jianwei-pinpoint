@@ -17,10 +17,14 @@ from ..core import discovery
 from ..core.versions import FIXED_RELEASES, classify
 from .deps import (  # noqa: F401  —— 显式导入，避免星号导入掩盖未定义名
     _asset_from_profile,
+    _count_assets,
     _csv_response,
+    _delete_asset,
+    _get_asset,
     _load_assets,
     _lock,
     _save_assets,
+    _upsert_asset,
 )
 
 router = APIRouter()
@@ -46,21 +50,19 @@ def api_add_asset(body: AssetIn) -> dict:
     prof = discovery.discover(host, timeout=1.2, http_timeout=8.0)
     rec = _asset_from_profile(prof, body.group, body.owner, body.note)
     with _lock:
-        assets = _load_assets()
-        assets = [a for a in assets if a.get("host") != host]
-        assets.append(rec)
-        _save_assets(assets)
-    return {"ok": True, "asset": rec, "total": len(assets)}
+        # 增量写：只动这一行，代价与台账规模无关。
+        # （旧实现是「读全部 -> 改内存 -> 写全部」，台账越大越慢）
+        _upsert_asset(rec)
+        total = _count_assets()
+    return {"ok": True, "asset": rec, "total": total}
 
 
 @router.delete("/api/assets")
 def api_del_asset(host: str) -> dict:
     with _lock:
-        assets = _load_assets()
-        before = len(assets)
-        assets = [a for a in assets if a.get("host") != host]
-        _save_assets(assets)
-    return {"ok": True, "removed": before - len(assets), "total": len(assets)}
+        removed = 1 if _delete_asset(host) else 0
+        total = _count_assets()
+    return {"ok": True, "removed": removed, "total": total}
 
 
 @router.patch("/api/assets")
@@ -69,17 +71,14 @@ def api_update_asset(payload: dict) -> dict:
     if not host:
         raise HTTPException(status_code=400, detail="缺少 host")
     with _lock:
-        assets = _load_assets()
-        found = False
-        for a in assets:
-            if a.get("host") == host:
-                for k in ("group", "owner", "note"):
-                    if k in payload:
-                        a[k] = payload[k]
-                found = True
-        _save_assets(assets)
-    if not found:
-        raise HTTPException(status_code=404, detail="资产不存在")
+        # 按 host 取单条（O(1)），改完增量写回 —— 不再全量读 + 全量写
+        updated = _get_asset(host)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="资产不存在")
+        for k in ("group", "owner", "note"):
+            if k in payload:
+                updated[k] = payload[k]
+        _upsert_asset(updated)
     return {"ok": True}
 
 

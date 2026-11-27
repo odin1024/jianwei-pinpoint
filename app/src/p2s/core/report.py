@@ -201,6 +201,24 @@ def to_html(result: ScanResult, path: str | Path) -> Path:
     advice.append("<li>确认 <code>session.upload_progress.enabled=0</code> 等缓解配置在目标主机上生效"
                   "（需在目标机执行 Agent 采集脚本核实，远程无法判断）。</li>")
 
+    # 品牌标识：复用 core.brand 的矢量图标，不另画一套
+    from .brand import APP_NAME_CN, APP_NAME_EN, APP_TAGLINE, icon_svg
+
+    logo_svg = icon_svg(size=34, radius=6)
+
+    # 方法论说明：报告的核心差异正是"怎么判的"，必须写进交付物里。
+    # 口径与 CHANGELOG / docs 一致，不夸大能力。
+    methodology_rows = "".join(
+        f"<tr><td class='mono'>{esc(a)}</td><td>{esc(b)}</td></tr>" for a, b in (
+            ("证据分级", "T1 = 协议层可复现响应；T2 = 指纹与版本交叉印证；T3 = 仅凭特征推测"),
+            ("确认受影响", "PHP 版本低于该分支修复基线，且证据等级 ≥ T2"),
+            ("无法判定", "版本不可识别，或证据等级不足 —— 不猜，明确标注待确认"),
+            ("已修复", "版本不低于修复基线，且未命中任何利用特征"),
+            ("判定优先级", "发行版 changelog 回移 > 补丁标记 > 构建时间 > 版本号"),
+            ("能力边界", "远程只能给出「疑似」，本地采集才能给出「确认」"),
+        )
+    )
+
     html = f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -217,6 +235,11 @@ def to_html(result: ScanResult, path: str | Path) -> Path:
   header{{border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:26px;
          display:flex;align-items:flex-end;gap:16px}}
   header .t{{flex:1}}
+  .logo{{display:flex;align-items:center;gap:9px;margin-bottom:9px}}
+  .logo .mark{{display:block;flex:0 0 auto}}
+  .logo .nm{{font-size:13px;font-weight:640;letter-spacing:.2px}}
+  .logo .nm em{{font-style:normal;color:var(--ink3);font-weight:500}}
+  .logo .tg{{font-size:11px;color:var(--ink3);border-left:1px solid var(--line);padding-left:9px}}
   h1{{font-size:24px;margin:0 0 6px;letter-spacing:-.3px}}
   .meta{{color:var(--ink3);font-size:12.5px;line-height:1.7}}
   .sev{{font-size:12px;color:var(--ink2);border:1px solid var(--line);border-radius:6px;padding:8px 12px}}
@@ -248,14 +271,21 @@ def to_html(result: ScanResult, path: str | Path) -> Path:
               background:var(--soft);border:1px solid var(--line);border-radius:3px;padding:0 4px}}
   footer{{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
          color:var(--ink3);font-size:11.5px;line-height:1.8}}
+  footer .brand{{display:flex;align-items:center;gap:7px;margin-top:9px;color:var(--ink2)}}
   @media print{{
     body{{background:#fff}} .page{{box-shadow:none;margin:0;padding:24px;max-width:none}}
     h2{{break-after:avoid}} tr{{break-inside:avoid}}
+    .logo,.logo svg{{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
   }}
 </style></head>
 <body><div class="page">
 <header>
   <div class="t">
+    <div class="logo">
+      <span class="mark">{logo_svg}</span>
+      <span class="nm">{esc(APP_NAME_CN)} <em>{esc(APP_NAME_EN)}</em></span>
+      <span class="tg">{esc(APP_TAGLINE)}</span>
+    </div>
     <h1>PHP 暴露面检测报告</h1>
     <div class="meta">
       扫描编号 <span class="mono">{esc(result.scan_id)}</span> ·
@@ -288,10 +318,18 @@ def to_html(result: ScanResult, path: str | Path) -> Path:
 <h2>整改建议</h2>
 <ol class="adv">{''.join(advice)}</ol>
 
+<h2>检测方法与判据</h2>
+<div class="meta" style="margin-top:-2px">
+  本节说明报告中每条结论是怎么得出的，便于复核与质疑。
+</div>
+<table><thead><tr><th>口径</th><th>说明</th></tr></thead>
+<tbody>{methodology_rows}</tbody></table>
+
 <footer>
   本报告基于远程探测与本地采集的事实生成，结论区分「确认受影响 / 无法判定」两类；
   未标注为确认的条目需结合目标主机实际情况复核。<br>
-  生成时间 {esc(result.finished_at or result.started_at or '-')} · 由见微 Pinpoint 生成
+  生成时间 {esc(result.finished_at or result.started_at or '-')}
+  <div class="brand">{logo_svg}<span>{esc(APP_NAME_CN)} {esc(APP_NAME_EN)} · {esc(APP_TAGLINE)}</span></div>
 </footer>
 </div></body></html>
 """

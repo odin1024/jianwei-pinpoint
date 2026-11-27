@@ -59,9 +59,9 @@ async function loadOverview(c){
       <div class="card-h"><h3>设备类型分布</h3><div class="sp"></div>
         <button class="btn sm ghost" onclick="location.hash='discover'">设备发现 →</button></div>
       <div class="card-b">
-        ${types.length?types.map(([k,v])=>`<div class="bar-line">
+        ${types.length?types.map(([k,v],i)=>`<div class="bar-line">
             <span class="nm" title="${esc(k)}">${esc(k)}</span>
-            <span class="track"><i class="fill" style="width:${(v/maxT*100).toFixed(1)}%"></i></span>
+            <span class="track"><i class="fill" style="width:${(v/maxT*100).toFixed(1)}%;background:var(--chart-${(i%4)+1})"></i></span>
             <span class="n num">${v}</span></div>`).join('')
           :'<div class="empty">'+ico('radar')+'<b>还没有资产</b><p>去「设备发现」跑一次网段扫描</p></div>'}
       </div>
